@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 from typing import List, Optional, Sequence, Tuple
@@ -8,6 +9,27 @@ from typing import List, Optional, Sequence, Tuple
 from inferdoctor import __version__
 from inferdoctor.checkers import default_registry
 from inferdoctor.core.capacity import render_capacity
+from inferdoctor.core.dify import (
+    DifyError,
+    available_dify_template_names,
+    export_dify_template,
+    load_dify_config,
+    optimize_dify,
+    render_dify_check,
+    render_dify_knowledge,
+    render_dify_optimize,
+    render_dify_perf,
+    render_dify_smoke,
+    render_dify_template_export,
+    render_dify_template_list,
+    render_dify_template_show,
+    render_dify_validation,
+    run_dify_check,
+    run_dify_knowledge_check,
+    run_dify_perf,
+    run_dify_smoke,
+    validate_dify_kit,
+)
 from inferdoctor.core.config import (
     Config,
     ConfigError,
@@ -411,6 +433,81 @@ def _parser() -> argparse.ArgumentParser:
         epilog="Example: inferdoctor experience profile customer-service",
     )
     experience_profile.add_argument("name", choices=profile_names(), help="Experience profile name")
+
+
+    dify = subparsers.add_parser(
+        "dify",
+        help="Validate, smoke-test, and optimize Dify application kits",
+        description=(
+            "Dify integration helpers for published app APIs, Local/Private RAG kits, "
+            "safe smoke tests, and performance UX guidance."
+        ),
+    )
+    dify_subparsers = dify.add_subparsers(dest="dify_command", required=True)
+
+    def add_dify_app_options(command):
+        command.add_argument("--base-url", help="Dify application API base URL, for example http://127.0.0.1:5001/v1")
+        command.add_argument("--app-key-env", default="DIFY_APP_API_KEY", help="Environment variable containing the Dify application API key")
+        command.add_argument("--timeout", type=_positive_float, default=30.0, help="Strict request timeout in seconds")
+        command.add_argument("--allow-non-local", action="store_true", help="Allow a tiny live request to a LAN/private Dify endpoint you control")
+        command.add_argument("--allow-public", action="store_true", help="Allow a tiny live request to an explicitly supplied public Dify endpoint")
+        command.add_argument("--format", choices=("console", "json", "markdown"), default="console", help="Output format")
+        command.add_argument("--output", help="Write output to this file")
+
+    dify_check = dify_subparsers.add_parser("check", help="Check Dify app API configuration and /info readiness")
+    add_dify_app_options(dify_check)
+
+    dify_template = dify_subparsers.add_parser("template", help="List, show, and export Dify application kits")
+    dify_template_subparsers = dify_template.add_subparsers(dest="dify_template_command", required=True)
+    dify_template_subparsers.add_parser("list", help="List built-in Dify kits")
+    dify_template_show = dify_template_subparsers.add_parser("show", help="Show one Dify kit")
+    dify_template_show.add_argument("name", choices=available_dify_template_names() + ["local-rag", "private-rag"])
+    dify_template_export = dify_template_subparsers.add_parser("export", help="Export a Dify kit to a directory")
+    dify_template_export.add_argument("name", choices=available_dify_template_names() + ["local-rag", "private-rag"])
+    dify_template_export.add_argument("--output", required=True, help="Directory where kit files should be written")
+    dify_template_export.add_argument("--overwrite", action="store_true", help="Overwrite generated kit files in a non-empty output directory")
+
+    dify_validate = dify_subparsers.add_parser("validate", help="Offline-validate a Dify kit or DSL file")
+    dify_validate.add_argument("path", help="Dify kit directory or dify_app.yaml path")
+    dify_validate.add_argument("--format", choices=("console", "json", "markdown"), default="console")
+    dify_validate.add_argument("--output", help="Write output to this file")
+
+    dify_smoke = dify_subparsers.add_parser("smoke", help="Run an offline or tiny live Dify app smoke test")
+    dify_smoke.add_argument("--kit", help="Dify kit directory for offline dry-run validation")
+    dify_smoke.add_argument("--dry-run", action="store_true", help="Do not contact Dify; validate the kit only")
+    dify_smoke.add_argument("--query", help="Harmless non-sensitive query for live mode")
+    dify_smoke.add_argument("--show-answer", action="store_true", help="Show a short answer preview in live mode")
+    add_dify_app_options(dify_smoke)
+
+    dify_perf = dify_subparsers.add_parser("perf", help="Run bounded Dify application performance smoke tests")
+    add_dify_app_options(dify_perf)
+    dify_perf.add_argument("--runs", type=_perf_runs, default=1, help="Measured request count, bounded to 1-3")
+    dify_perf.add_argument("--warmup", type=_perf_warmup, default=0, help="Warmup request count, bounded to 0-1")
+    dify_perf.add_argument("--query", help="Harmless non-sensitive query for the smoke test")
+    dify_perf.add_argument("--profile", choices=profile_names(), help="Experience profile for readiness context")
+
+    dify_optimize = dify_subparsers.add_parser("optimize", help="Generate Dify-specific performance optimization guidance")
+    dify_optimize.add_argument("--report", help="Dify performance JSON report")
+    dify_optimize.add_argument("--kit", help="Dify kit directory or DSL path for static analysis")
+    dify_optimize.add_argument("--retrieval-ms", type=_positive_float, help="User-supplied retrieval latency in milliseconds")
+    dify_optimize.add_argument("--rerank-ms", type=_positive_float, help="User-supplied rerank latency in milliseconds")
+    dify_optimize.add_argument("--profile", choices=profile_names(), help="Experience profile for optimization priorities")
+    dify_optimize.add_argument("--format", choices=("console", "json", "markdown"), default="console")
+    dify_optimize.add_argument("--output", help="Write output to this file")
+
+    dify_knowledge = dify_subparsers.add_parser("knowledge", help="Read-only Dify knowledge retrieval checks")
+    dify_knowledge_subparsers = dify_knowledge.add_subparsers(dest="dify_knowledge_command", required=True)
+    dify_knowledge_check = dify_knowledge_subparsers.add_parser("check", help="Run a read-only knowledge retrieval check")
+    dify_knowledge_check.add_argument("--base-url", help="Dify knowledge API base URL")
+    dify_knowledge_check.add_argument("--knowledge-key-env", default="DIFY_KNOWLEDGE_API_KEY", help="Environment variable containing the Dify knowledge API key")
+    dify_knowledge_check.add_argument("--dataset-id", help="Dify dataset ID; defaults to DIFY_DATASET_ID")
+    dify_knowledge_check.add_argument("--query", default="fictional return policy", help="Harmless retrieval query")
+    dify_knowledge_check.add_argument("--show-content", action="store_true", help="Show short retrieved content previews")
+    dify_knowledge_check.add_argument("--timeout", type=_positive_float, default=30.0)
+    dify_knowledge_check.add_argument("--allow-non-local", action="store_true")
+    dify_knowledge_check.add_argument("--allow-public", action="store_true")
+    dify_knowledge_check.add_argument("--format", choices=("console", "json", "markdown"), default="console")
+    dify_knowledge_check.add_argument("--output", help="Write output to this file")
 
     report = subparsers.add_parser(
         "report",
@@ -960,6 +1057,52 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             except ValueError as exc:
                 print("inferdoctor: {0}".format(exc), file=sys.stderr)
                 return 2
+
+
+    if args.command == "dify":
+        try:
+            if args.dify_command == "check":
+                config = load_dify_config(base_url=args.base_url, app_key_env=args.app_key_env, timeout=args.timeout, allow_non_local=args.allow_non_local, allow_public=args.allow_public)
+                result = run_dify_check(config)
+                _emit_output(render_dify_check(result, args.format), args.output)
+                return 1 if result.get("status") == "FAIL" else 0
+            if args.dify_command == "template":
+                if args.dify_template_command == "list":
+                    print(render_dify_template_list())
+                    return 0
+                if args.dify_template_command == "show":
+                    print(render_dify_template_show(args.name))
+                    return 0
+                if args.dify_template_command == "export":
+                    written = export_dify_template(args.name, args.output, overwrite=args.overwrite)
+                    print(render_dify_template_export(args.name, args.output, written))
+                    return 0
+            if args.dify_command == "validate":
+                result = validate_dify_kit(args.path)
+                _emit_output(render_dify_validation(result, args.format), args.output)
+                return 1 if result.get("status") == "FAIL" else 0
+            if args.dify_command == "smoke":
+                config = load_dify_config(base_url=args.base_url, app_key_env=args.app_key_env, timeout=args.timeout, allow_non_local=args.allow_non_local, allow_public=args.allow_public)
+                result = run_dify_smoke(config, kit_path=args.kit, dry_run=args.dry_run, query=args.query, show_answer=args.show_answer)
+                _emit_output(render_dify_smoke(result, args.format), args.output)
+                return 1 if result.get("status") == "FAIL" else 0
+            if args.dify_command == "perf":
+                config = load_dify_config(base_url=args.base_url, app_key_env=args.app_key_env, timeout=args.timeout, allow_non_local=args.allow_non_local, allow_public=args.allow_public)
+                result = run_dify_perf(config, runs=args.runs, warmup=args.warmup, profile=args.profile, query=args.query)
+                _emit_output(render_dify_perf(result, args.format), args.output)
+                return 1 if result.get("failed_runs", 0) and not result.get("successful_runs", 0) else 0
+            if args.dify_command == "optimize":
+                result = optimize_dify(report_path=args.report, kit_path=args.kit, retrieval_ms=args.retrieval_ms, rerank_ms=args.rerank_ms, profile=args.profile)
+                _emit_output(render_dify_optimize(result, args.format), args.output)
+                return 0
+            if args.dify_command == "knowledge" and args.dify_knowledge_command == "check":
+                config = load_dify_config(knowledge_base_url=args.base_url, knowledge_key_env=args.knowledge_key_env, dataset_id=args.dataset_id, timeout=args.timeout, allow_non_local=args.allow_non_local, allow_public=args.allow_public)
+                result = run_dify_knowledge_check(config, query=args.query, show_content=args.show_content)
+                _emit_output(render_dify_knowledge(result, args.format), args.output)
+                return 1 if result.get("status") == "FAIL" else 0
+        except (DifyError, KeyError, OSError, json.JSONDecodeError) as exc:
+            print("inferdoctor: {0}".format(exc), file=sys.stderr)
+            return 2
 
     if args.command == "recommend":
         print(

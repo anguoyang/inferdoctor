@@ -1,0 +1,194 @@
+import json
+
+import pytest
+
+from inferdoctor.cli import main
+from inferdoctor.core.dify import (
+    DIFY_PERF_SCHEMA_VERSION,
+    DifyConfig,
+    export_dify_template,
+    interpret_dify_events,
+    optimize_dify,
+    parse_sse_lines,
+    run_dify_check,
+    run_dify_knowledge_check,
+    run_dify_perf,
+    run_dify_smoke,
+    validate_dify_kit,
+)
+from inferdoctor.core.perf_baseline import baseline_from_report
+from inferdoctor.core.perf_compare import compare_performance
+
+
+class FakeChatClient:
+    def __init__(self, base_url, api_key=None, timeout=30.0):
+        self.base_url = base_url
+        self.api_key = api_key
+        self.timeout = timeout
+
+    def get_info(self):
+        return {"name": "Demo", "mode": "advanced-chat", "description": "demo"}
+
+    def run_chat_stream(self, query, *, user, show_answer=False):
+        return {
+            "event_count": 3,
+            "first_event_index": 0,
+            "first_visible_text_index": 1,
+            "ttft_seconds": 0.8,
+            "total_latency_seconds": 2.4,
+            "node_event_count": 1,
+            "workflow_event_count": 1,
+            "completion_status": "completed",
+            "errors": [],
+            "answer_preview": "ok" if show_answer else None,
+            "answer_retained": show_answer,
+        }
+
+
+class FakeWorkflowClient(FakeChatClient):
+    def get_info(self):
+        return {"name": "Workflow", "mode": "workflow"}
+
+    def run_workflow_stream(self, query, *, user, show_answer=False):
+        return {
+            "event_count": 4,
+            "first_event_index": 0,
+            "first_visible_text_index": 2,
+            "ttft_seconds": 1.2,
+            "total_latency_seconds": 3.0,
+            "node_event_count": 2,
+            "workflow_event_count": 2,
+            "completion_status": "completed",
+            "errors": [],
+        }
+
+
+class FakeKnowledgeClient(FakeChatClient):
+    def retrieve_chunks(self, dataset_id, query):
+        return {"records": [{"score": 0.91, "segment": {"content": "private text suppressed"}}]}
+
+
+def _config():
+    return DifyConfig(
+        app_base_url="http://127.0.0.1:5001/v1",
+        app_api_key="secret-app-key",
+        knowledge_base_url="http://127.0.0.1:5001/v1",
+        knowledge_api_key="secret-knowledge-key",
+        dataset_id="dataset-id",
+    )
+
+
+def test_dify_template_export_and_validate(tmp_path):
+    output = tmp_path / "kit"
+    written = export_dify_template("local-private-rag", output)
+
+    result = validate_dify_kit(output)
+
+    assert len(written) >= 9
+    assert result["status"] == "WARN"
+    assert result["readiness_score"] > 80
+    assert (output / "dify_app.yaml").exists()
+    assert "MODEL_NAME_PLACEHOLDER" in (output / "dify_app.yaml").read_text(encoding="utf-8")
+
+
+def test_sse_parser_handles_dify_chat_and_workflow_events():
+    events = parse_sse_lines(
+        [
+            b": keepalive\n",
+            b"event: workflow_started\n",
+            b'data: {\"event\":\"workflow_started\"}\n',
+            b"\n",
+            b"event: message\n",
+            b'data: {\"answer\":\"hello\"}\n',
+            b"\n",
+            b"event: message_end\n",
+            b"data: {}\n",
+            b"\n",
+        ]
+    )
+    metrics = interpret_dify_events(events)
+
+    assert len(events) == 3
+    assert metrics["first_visible_text_index"] == 1
+    assert metrics["completion_status"] == "completed"
+    assert metrics["workflow_event_count"] == 1
+
+
+def test_dify_check_uses_info_api_with_redacted_endpoint():
+    result = run_dify_check(_config(), client_factory=FakeChatClient)
+
+    assert result["status"] == "PASS"
+    assert result["app_mode"] == "advanced-chat"
+    assert "smoke" in result["supported_operations"]
+
+
+def test_dify_check_without_key_does_not_call_network():
+    result = run_dify_check(DifyConfig(app_base_url="http://127.0.0.1:5001/v1"))
+
+    assert result["status"] == "WARN"
+    assert result["authenticated"] is False
+    assert "DIFY_APP_API_KEY" in result["warnings"][-1]
+
+
+def test_dify_smoke_supports_chatflow_and_workflow():
+    chat = run_dify_smoke(_config(), client_factory=FakeChatClient)
+    workflow = run_dify_smoke(_config(), client_factory=FakeWorkflowClient)
+
+    assert chat["status"] == "PASS"
+    assert chat["app_mode"] == "advanced-chat"
+    assert workflow["status"] == "PASS"
+    assert workflow["app_mode"] == "workflow"
+
+
+def test_dify_perf_report_works_with_baseline_and_compare():
+    report = run_dify_perf(_config(), runs=2, warmup=1, client_factory=FakeChatClient)
+    better = dict(report)
+    better["metrics"] = dict(report["metrics"], ttft_seconds=0.4)
+    better["metrics"]["aggregate"] = dict(report["metrics"]["aggregate"], ttft_median=0.4)
+
+    baseline = baseline_from_report(report, name="before")
+    candidate = baseline_from_report(better, name="after")
+    comparison = compare_performance(baseline, candidate)
+
+    assert report["schema_version"] == DIFY_PERF_SCHEMA_VERSION
+    assert baseline["source_schema_version"] == DIFY_PERF_SCHEMA_VERSION
+    assert comparison["metric_changes"]["ttft_seconds"]["direction"] == "improvement"
+
+
+def test_dify_optimize_uses_report_and_kit(tmp_path):
+    output = tmp_path / "kit"
+    export_dify_template("local-private-rag", output)
+    report = run_dify_perf(_config(), runs=1, client_factory=FakeChatClient)
+    report_path = tmp_path / "perf.json"
+    report_path.write_text(json.dumps(report), encoding="utf-8")
+
+    plan = optimize_dify(report_path=str(report_path), kit_path=str(output), retrieval_ms=900)
+
+    assert plan["schema_version"].endswith(".v1")
+    assert any(item["evidence"] in {"Observed", "Strongly indicated"} for item in plan["recommendations"])
+
+
+def test_dify_knowledge_check_suppresses_content_by_default():
+    result = run_dify_knowledge_check(_config(), client_factory=FakeKnowledgeClient)
+
+    assert result["status"] == "PASS"
+    assert result["result_count"] == 1
+    assert result["content_preview"] is None
+    assert result["content_retained"] is False
+
+
+def test_dify_cli_template_flow(tmp_path, capsys):
+    output = tmp_path / "kit"
+
+    assert main(["dify", "template", "list"]) == 0
+    assert "local-private-rag" in capsys.readouterr().out
+    assert main(["dify", "template", "export", "local-private-rag", "--output", str(output)]) == 0
+    assert main(["dify", "validate", str(output)]) == 0
+    assert main(["dify", "smoke", "--kit", str(output), "--dry-run"]) == 0
+
+
+def test_dify_cli_help_pages(capsys):
+    with pytest.raises(SystemExit) as exc:
+        main(["dify", "--help"])
+    assert exc.value.code == 0
+    assert "Dify" in capsys.readouterr().out
