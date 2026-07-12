@@ -43,7 +43,16 @@ def _metric(data: Dict[str, Any], key: str) -> Optional[float]:
     return None
 
 
-def _append_unique(items: List[Dict[str, str]], priority: str, observation: str, action: str, verify: str, impact: str, limitation: str) -> None:
+def _append_unique(
+    items: List[Dict[str, str]],
+    priority: str,
+    observation: str,
+    action: str,
+    verify: str,
+    impact: str,
+    limitation: str,
+    evidence_level: str = "Possible",
+) -> None:
     key = (priority, observation, action)
     existing = {(item["priority"], item["observation"], item["action"]) for item in items}
     if key in existing:
@@ -55,6 +64,7 @@ def _append_unique(items: List[Dict[str, str]], priority: str, observation: str,
         "verify": verify,
         "expected_impact": impact,
         "limitation": limitation,
+        "evidence_level": evidence_level,
     })
 
 
@@ -194,7 +204,8 @@ def render_plan_json(plan: Dict[str, Any]) -> str:
 
 def _render_action(action: Dict[str, str]) -> List[str]:
     return [
-        "- Observation: {0}".format(action["observation"]),
+        "- Evidence: {0}".format(action.get("evidence_level", "Possible")),
+        "  Observation: {0}".format(action["observation"]),
         "  Action: {0}".format(action["action"]),
         "  Verify: {0}".format(action["verify"]),
         "  Expected impact: {0}".format(action["expected_impact"]),

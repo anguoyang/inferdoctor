@@ -103,3 +103,12 @@ def test_optimize_plan_requires_baseline_and_candidate_together(capsys):
 
     assert exit_code == 2
     assert "requires both --baseline and --candidate" in capsys.readouterr().err
+
+
+def test_optimization_plan_actions_include_evidence_level():
+    plan = build_optimization_plan(runtime="vllm", model_size="14b", vram_gib=24, ttft=2.4)
+
+    assert plan["actions"]
+    assert all(action.get("evidence_level") for action in plan["actions"])
+    rendered = render_optimization_plan(plan)
+    assert "Evidence:" in rendered
