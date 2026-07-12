@@ -82,6 +82,10 @@ def test_generated_template_readmes_explain_endpoint_and_validation(tmp_path):
         assert "OpenAI-compatible" in readme
         assert "inferdoctor template validate ." in readme
         assert "inferdoctor template smoke-test ." in readme
+        assert "inferdoctor perf baseline create" in readme
+        assert "inferdoctor perf compare before.json after.json" in readme
+        assert "inferdoctor optimize plan --report before.json" in readme
+        assert "--allow-non-local" in readme
         assert "Expected File Tree" in readme
 
 

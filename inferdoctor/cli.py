@@ -15,12 +15,40 @@ from inferdoctor.core.config import (
     normalize_endpoint,
 )
 from inferdoctor.core.explain import explain_topics, render_explanation
+from inferdoctor.core.endpoint_safety import classify_endpoint, render_endpoint_safety_error
+from inferdoctor.core.experience import (
+    apply_profile_to_optimization_report,
+    apply_profile_to_perf_result,
+    get_profile,
+    profile_names,
+    render_profile as render_experience_profile,
+)
 from inferdoctor.core.model_fit import estimate_model_fit, render_model_fit
 from inferdoctor.core.optimize import advise_endpoint, advise_rag, render_optimization_report
+from inferdoctor.core.optimization_plan import build_optimization_plan, render_optimization_plan
 from inferdoctor.core.models import CheckResult, Status
 from inferdoctor.core.profile import render_profile_json, render_profile_markdown
 from inferdoctor.core.perf import render_perf_json, render_perf_markdown, render_perf_result, run_endpoint_smoke, run_streaming_smoke
+from inferdoctor.core.perf_baseline import (
+    create_baseline_from_report_file,
+    delete_baseline,
+    list_baselines,
+    load_report_or_baseline,
+    render_baseline_list,
+    render_baseline_markdown,
+    render_baseline_summary,
+)
+from inferdoctor.core.perf_compare import compare_performance_files, render_comparison
 from inferdoctor.core.recommendations import recommend_stack, render_recommendation
+from inferdoctor.core.quickstart import (
+    QUICKSTART_GOALS,
+    QUICKSTART_HARDWARE,
+    QUICKSTART_LOCATIONS,
+    QUICKSTART_PREFERENCES,
+    QUICKSTART_RUNTIMES,
+    build_quickstart_plan,
+    render_quickstart_plan,
+)
 from inferdoctor.core.runner import run_checks
 from inferdoctor.core.scenarios import evaluate_scenarios, render_scenarios, scenario_names
 from inferdoctor.core.setup import GOALS, PREFERENCES, RUNTIMES, recommend_setup, render_setup_plan
@@ -224,6 +252,7 @@ def _parser() -> argparse.ArgumentParser:
     optimize_endpoint.add_argument("--docker", action="store_true", help="Whether Docker is involved in the endpoint path")
     optimize_endpoint.add_argument("--cold-start", action="store_true", help="Whether the first request is noticeably slower")
     optimize_endpoint.add_argument("--cpu-fallback-suspected", action="store_true", help="Whether runtime logs or behavior suggest CPU fallback")
+    optimize_endpoint.add_argument("--profile", choices=profile_names(), help="Application experience profile for advice context")
     optimize_rag = optimize_subparsers.add_parser(
         "rag",
         help="Suggest RAG user-experience optimizations",
@@ -245,6 +274,30 @@ def _parser() -> argparse.ArgumentParser:
     optimize_rag.add_argument("--streaming", action="store_true", help="Whether the app streams tokens to users")
     optimize_rag.add_argument("--model-size", type=_model_size, help="Model size class such as 7b, 14b, or 32b")
     optimize_rag.add_argument("--vram", type=_positive_float, help="Available VRAM in GiB")
+    optimize_rag.add_argument("--profile", choices=profile_names(), help="Application experience profile for RAG UX context")
+    optimize_plan = optimize_subparsers.add_parser(
+        "plan",
+        help="Generate an actionable optimization plan",
+        description=(
+            "Turn performance reports, comparisons, and supplied runtime facts into prioritized next steps. "
+            "This command is advice-only and does not call endpoints."
+        ),
+        epilog="Examples: inferdoctor optimize plan --report perf.json | inferdoctor optimize plan --baseline before.json --candidate after.json --format markdown",
+    )
+    optimize_plan.add_argument("--report", help="Performance report or saved baseline JSON to analyze")
+    optimize_plan.add_argument("--baseline", help="Baseline JSON path or saved baseline name")
+    optimize_plan.add_argument("--candidate", help="Candidate JSON path or saved baseline name")
+    optimize_plan.add_argument("--runtime", choices=("ollama", "vllm", "sglang", "openai-compatible"), help="Runtime hint")
+    optimize_plan.add_argument("--model-size", type=_model_size, help="Model size class such as 7b, 14b, or 32b")
+    optimize_plan.add_argument("--vram", type=_positive_float, help="Available VRAM in GiB")
+    optimize_plan.add_argument("--goal", choices=GOALS, help="Application goal")
+    optimize_plan.add_argument("--streaming", action="store_true", help="Whether the app is intended to stream output")
+    optimize_plan.add_argument("--retrieval-ms", type=_positive_float, help="User-provided retrieval latency in milliseconds")
+    optimize_plan.add_argument("--rerank-ms", type=_positive_float, help="User-provided rerank latency in milliseconds")
+    optimize_plan.add_argument("--ttft", type=_positive_float, help="Observed TTFT in seconds")
+    optimize_plan.add_argument("--profile", choices=profile_names(), help="Application experience profile for optimization priorities")
+    optimize_plan.add_argument("--format", choices=("console", "json", "markdown"), default="console", help="Output format")
+    optimize_plan.add_argument("--output", help="Write plan output to this file")
 
     perf = subparsers.add_parser(
         "perf",
@@ -271,6 +324,8 @@ def _parser() -> argparse.ArgumentParser:
     perf_endpoint.add_argument("--warmup", type=_perf_warmup, default=0, help="Warmup request count, bounded to 0-1 and excluded from metrics")
     perf_endpoint.add_argument("--format", choices=("console", "json", "markdown"), default="console", help="Output format")
     perf_endpoint.add_argument("--output", help="Write report to a file instead of stdout")
+    perf_endpoint.add_argument("--profile", choices=profile_names(), help="Application experience profile for readiness guidance")
+    perf_endpoint.add_argument("--allow-non-local", action="store_true", help="Allow a tiny live smoke-test prompt to a LAN/private endpoint you control")
     perf_streaming = perf_subparsers.add_parser(
         "streaming",
         help="Smoke-test streaming TTFT for an OpenAI-compatible endpoint",
@@ -287,6 +342,75 @@ def _parser() -> argparse.ArgumentParser:
     perf_streaming.add_argument("--warmup", type=_perf_warmup, default=0, help="Warmup request count, bounded to 0-1 and excluded from metrics")
     perf_streaming.add_argument("--format", choices=("console", "json", "markdown"), default="console", help="Output format")
     perf_streaming.add_argument("--output", help="Write report to a file instead of stdout")
+    perf_streaming.add_argument("--profile", choices=profile_names(), help="Application experience profile for readiness guidance")
+    perf_streaming.add_argument("--allow-non-local", action="store_true", help="Allow a tiny live smoke-test prompt to a LAN/private endpoint you control")
+
+    perf_compare = perf_subparsers.add_parser(
+        "compare",
+        help="Compare two performance smoke-test reports or baselines",
+        description=(
+            "Compare before-and-after InferDoctor performance smoke-test JSON files. "
+            "The comparison is heuristic and warns when inputs are not directly comparable."
+        ),
+        epilog="Examples: inferdoctor perf compare before.json after.json | inferdoctor perf compare --baseline before.json --candidate after.json --format markdown",
+    )
+    perf_compare.add_argument("paths", nargs="*", help="Optional positional baseline and candidate JSON paths")
+    perf_compare.add_argument("--baseline", help="Baseline JSON path or saved baseline name")
+    perf_compare.add_argument("--candidate", help="Candidate JSON path or saved baseline name")
+    perf_compare.add_argument("--format", choices=("console", "json", "markdown"), default="console", help="Output format")
+    perf_compare.add_argument("--output", help="Write comparison output to this file")
+
+    perf_baseline = perf_subparsers.add_parser(
+        "baseline",
+        help="Save, inspect, and delete sanitized performance baselines",
+        description=(
+            "Manage user-local performance smoke-test baselines. Baselines store sanitized metrics, "
+            "not response text, API keys, or authorization headers."
+        ),
+    )
+    baseline_subparsers = perf_baseline.add_subparsers(dest="baseline_command", required=True)
+    baseline_create = baseline_subparsers.add_parser(
+        "create",
+        help="Create a sanitized baseline from a performance JSON report",
+        epilog="Example: inferdoctor perf baseline create --report perf.json --name before",
+    )
+    baseline_create.add_argument("--report", required=True, help="Performance JSON report created by inferdoctor perf endpoint/streaming")
+    baseline_create.add_argument("--name", help="Human-friendly baseline name; used for user-local storage")
+    baseline_create.add_argument("--runtime", help="Runtime label such as ollama, vllm, sglang, or lmstudio")
+    baseline_create.add_argument("--output", help="Write baseline JSON to this path instead of the user-local baseline directory")
+    baseline_show = baseline_subparsers.add_parser(
+        "show",
+        help="Show a baseline by name or JSON path",
+        epilog="Example: inferdoctor perf baseline show before --format markdown",
+    )
+    baseline_show.add_argument("baseline", help="Baseline name or JSON path")
+    baseline_show.add_argument("--format", choices=("console", "json", "markdown"), default="console", help="Output format")
+    baseline_show.add_argument("--output", help="Write rendered baseline output to this file")
+    baseline_subparsers.add_parser(
+        "list",
+        help="List user-local performance baselines",
+        epilog="Example: inferdoctor perf baseline list",
+    )
+    baseline_delete = baseline_subparsers.add_parser(
+        "delete",
+        help="Delete a user-local baseline by name or path",
+        epilog="Example: inferdoctor perf baseline delete before --yes",
+    )
+    baseline_delete.add_argument("baseline", help="Baseline name or JSON path")
+    baseline_delete.add_argument("--yes", action="store_true", help="Confirm deletion")
+
+    experience = subparsers.add_parser(
+        "experience",
+        help="Explain local AI user-experience profiles",
+        description="Show what matters for a specific local AI application goal.",
+    )
+    experience_subparsers = experience.add_subparsers(dest="experience_command", required=True)
+    experience_profile = experience_subparsers.add_parser(
+        "profile",
+        help="Show an application experience profile",
+        epilog="Example: inferdoctor experience profile customer-service",
+    )
+    experience_profile.add_argument("name", choices=profile_names(), help="Experience profile name")
 
     report = subparsers.add_parser(
         "report",
@@ -363,6 +487,22 @@ def _parser() -> argparse.ArgumentParser:
         type=_positive_float,
         help="Override detected VRAM in GiB",
     )
+
+    quickstart = subparsers.add_parser(
+        "quickstart",
+        help="Plan a guided local or private AI app quickstart",
+        description=(
+            "Recommend a stack, template, endpoint configuration path, validation commands, "
+            "and performance verification steps. No installation is performed."
+        ),
+        epilog="Examples: inferdoctor quickstart customer-service --preference easiest | inferdoctor quickstart rag --endpoint http://192.168.1.20:8000/v1",
+    )
+    quickstart.add_argument("goal", nargs="?", choices=QUICKSTART_GOALS, help="What you want to build")
+    quickstart.add_argument("--preference", choices=QUICKSTART_PREFERENCES, default="easiest", help="Optimize for easiest setup or performance")
+    quickstart.add_argument("--endpoint", help="Existing local, LAN, or private OpenAI-compatible endpoint")
+    quickstart.add_argument("--location", choices=QUICKSTART_LOCATIONS, help="Where the endpoint runs: local, lan, or endpoint")
+    quickstart.add_argument("--hardware", choices=QUICKSTART_HARDWARE, default="auto", help="Hardware hint")
+    quickstart.add_argument("--runtime", choices=QUICKSTART_RUNTIMES, help="Existing runtime if known")
 
     init = subparsers.add_parser(
         "init",
@@ -683,9 +823,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if args.command == "explain":
         print(render_explanation(args.topic))
         return 0
+    if args.command == "experience":
+        if args.experience_command == "profile":
+            print(render_experience_profile(get_profile(args.name)))
+            return 0
     if args.command == "optimize":
         if args.optimize_command == "endpoint":
-            print(render_optimization_report(advise_endpoint(
+            print(render_optimization_report(apply_profile_to_optimization_report(advise_endpoint(
                 runtime=args.runtime,
                 vram_gib=args.vram,
                 model_size=args.model_size,
@@ -700,10 +844,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 docker=args.docker,
                 cold_start=args.cold_start,
                 cpu_fallback_suspected=args.cpu_fallback_suspected,
-            )))
+            ), args.profile)))
             return 0
         if args.optimize_command == "rag":
-            print(render_optimization_report(advise_rag(
+            print(render_optimization_report(apply_profile_to_optimization_report(advise_rag(
                 docs=args.docs,
                 chunks=args.chunks,
                 top_k=args.top_k,
@@ -719,18 +863,103 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 streaming=args.streaming,
                 model_size=args.model_size,
                 vram_gib=args.vram,
-            )))
+            ), args.profile)))
+            return 0
+        if args.optimize_command == "plan":
+            if (args.baseline and not args.candidate) or (args.candidate and not args.baseline):
+                print("inferdoctor: optimize plan requires both --baseline and --candidate when comparing", file=sys.stderr)
+                return 2
+            try:
+                plan = build_optimization_plan(
+                    report_path=args.report,
+                    baseline_path=args.baseline,
+                    candidate_path=args.candidate,
+                    runtime=args.runtime,
+                    model_size=args.model_size,
+                    vram_gib=args.vram,
+                    goal=args.goal,
+                    streaming=args.streaming,
+                    retrieval_ms=args.retrieval_ms,
+                    rerank_ms=args.rerank_ms,
+                    ttft=args.ttft,
+                    profile=args.profile,
+                )
+            except ValueError as exc:
+                print("inferdoctor: {0}".format(exc), file=sys.stderr)
+                return 2
+            _emit_output(render_optimization_plan(plan, args.format), args.output)
             return 0
 
     if args.command == "perf":
         if args.perf_command == "endpoint":
-            result = run_endpoint_smoke(args.endpoint, args.model, args.timeout, runs=args.runs, warmup=args.warmup)
+            safety = classify_endpoint(args.endpoint)
+            if safety.category == "invalid" or (safety.requires_explicit_allow and not args.allow_non_local):
+                print("inferdoctor: {0}".format(render_endpoint_safety_error(safety)), file=sys.stderr)
+                return 2
+            result = apply_profile_to_perf_result(run_endpoint_smoke(args.endpoint, args.model, args.timeout, runs=args.runs, warmup=args.warmup), args.profile)
             _emit_output(_render_perf_output(result, args.format), args.output)
             return 0
         if args.perf_command == "streaming":
-            result = run_streaming_smoke(args.endpoint, args.model, args.timeout, runs=args.runs, warmup=args.warmup)
+            safety = classify_endpoint(args.endpoint)
+            if safety.category == "invalid" or (safety.requires_explicit_allow and not args.allow_non_local):
+                print("inferdoctor: {0}".format(render_endpoint_safety_error(safety)), file=sys.stderr)
+                return 2
+            result = apply_profile_to_perf_result(run_streaming_smoke(args.endpoint, args.model, args.timeout, runs=args.runs, warmup=args.warmup), args.profile)
             _emit_output(_render_perf_output(result, args.format), args.output)
             return 0
+        if args.perf_command == "compare":
+            paths = list(args.paths or [])
+            if len(paths) > 2:
+                print("inferdoctor: perf compare accepts at most two positional paths", file=sys.stderr)
+                return 2
+            baseline_path = args.baseline or (paths[0] if len(paths) >= 1 else None)
+            candidate_path = args.candidate or (paths[1] if len(paths) >= 2 else None)
+            if not baseline_path or not candidate_path:
+                print("inferdoctor: perf compare requires a baseline and candidate JSON path", file=sys.stderr)
+                return 2
+            try:
+                comparison = compare_performance_files(baseline_path, candidate_path)
+            except ValueError as exc:
+                print("inferdoctor: {0}".format(exc), file=sys.stderr)
+                return 2
+            _emit_output(render_comparison(comparison, args.format), args.output)
+            return 0
+        if args.perf_command == "baseline":
+            try:
+                if args.baseline_command == "create":
+                    baseline, path = create_baseline_from_report_file(
+                        args.report,
+                        name=args.name,
+                        runtime=args.runtime,
+                        output=args.output,
+                    )
+                    print(render_baseline_summary(baseline, path))
+                    return 0
+                if args.baseline_command == "show":
+                    baseline = load_report_or_baseline(args.baseline)
+                    if args.format == "json":
+                        import json
+
+                        rendered = json.dumps(baseline, indent=2, sort_keys=True)
+                    elif args.format == "markdown":
+                        rendered = render_baseline_markdown(baseline, args.baseline)
+                    else:
+                        rendered = render_baseline_summary(baseline, args.baseline)
+                    _emit_output(rendered, args.output)
+                    return 0
+                if args.baseline_command == "list":
+                    print(render_baseline_list(list_baselines()))
+                    return 0
+                if args.baseline_command == "delete":
+                    if not args.yes:
+                        print("inferdoctor: refusing to delete baseline without --yes", file=sys.stderr)
+                        return 2
+                    deleted = delete_baseline(args.baseline)
+                    print("Deleted performance baseline: {0}".format(deleted))
+                    return 0
+            except ValueError as exc:
+                print("inferdoctor: {0}".format(exc), file=sys.stderr)
+                return 2
 
     if args.command == "recommend":
         print(
@@ -743,6 +972,29 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 )
             )
         )
+        return 0
+    if args.command == "quickstart":
+        goal = args.goal
+        preference = args.preference
+        location = args.location
+        hardware = args.hardware
+        runtime = args.runtime
+        endpoint = args.endpoint
+        interactive = sys.stdin.isatty() and goal is None and endpoint is None and runtime is None
+        if interactive:
+            goal = input("What do you want to build? [customer-service/restaurant-ordering/document-qa/rag/local-api/not-sure]: " ).strip() or None
+            preference = input("Prefer easiest setup or performance? [easiest/performance]: " ).strip() or preference
+            location = input("Endpoint location? [local/lan/endpoint]: " ).strip() or location
+            hardware = input("Hardware? [auto/cpu/gpu]: " ).strip() or hardware
+            runtime = input("Existing runtime? [ollama/vllm/sglang/xinference/openai-compatible/not-sure]: " ).strip() or runtime
+        print(render_quickstart_plan(build_quickstart_plan(
+            goal=goal,
+            preference=preference,
+            endpoint=endpoint,
+            location=location,
+            hardware=hardware,
+            runtime=runtime,
+        )))
         return 0
     if args.command == "init":
         goal = args.goal

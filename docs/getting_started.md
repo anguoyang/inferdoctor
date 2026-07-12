@@ -55,6 +55,7 @@ inferdoctor
 Pick a goal and get a practical recommendation:
 
 ```bash
+inferdoctor quickstart customer-service --preference easiest
 inferdoctor init --goal customer-service --preference easiest
 inferdoctor recommend --goal customer-service --preference easiest
 inferdoctor stack plan --goal customer-service
@@ -85,6 +86,28 @@ Then run the app when your local endpoint is ready:
 ```bash
 python app.py
 ```
+
+
+## Measure, Compare, and Optimize
+
+After the generated app can reach your local or private endpoint, create a small performance baseline before changing model, runtime, prompt, context size, or networking:
+
+```bash
+inferdoctor perf streaming --endpoint http://127.0.0.1:8000/v1 --model local-model --format json --output before.json
+inferdoctor perf baseline create --report before.json --name before
+```
+
+After a change, run another bounded smoke test and compare:
+
+```bash
+inferdoctor perf streaming --endpoint http://127.0.0.1:8000/v1 --model local-model --format json --output after.json
+inferdoctor perf compare before.json after.json
+inferdoctor optimize plan --baseline before.json --candidate after.json --goal customer-service
+```
+
+For a LAN or private endpoint you control, add `--allow-non-local` to live `inferdoctor perf` smoke tests. Do not send private documents or customer data in smoke-test prompts.
+
+These commands are smoke tests, not formal benchmarks. They do not download models, start runtimes, run long load tests, or evaluate answer quality.
 
 ## Endpoint Examples
 

@@ -1,0 +1,8 @@
+endpoint: http://127.0.0.1:8000/v1
+model: local-model
+timeout_seconds: 30
+streaming: true
+max_context_chars: 4000
+show_progress: true
+endpoint_health_check: true
+warmup_prompt: Say hello in one short sentence.

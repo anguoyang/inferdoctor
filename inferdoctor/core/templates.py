@@ -641,9 +641,15 @@ inferdoctor
 inferdoctor check vllm --endpoint http://127.0.0.1:8000/v1
 inferdoctor check sglang --endpoint http://127.0.0.1:30000/v1
 inferdoctor explain openai-compatible-connection-refused
-inferdoctor perf streaming --endpoint http://127.0.0.1:8000/v1 --model local-model
+inferdoctor perf streaming --endpoint http://127.0.0.1:8000/v1 --model local-model --format json --output before.json
+inferdoctor perf baseline create --report before.json --name before
+inferdoctor optimize plan --report before.json --goal customer-service
+# After a change, save after.json and compare:
+inferdoctor perf compare before.json after.json
 inferdoctor optimize endpoint --runtime vllm --vram 24 --model-size 14b
 ```
+
+For a LAN or private endpoint you control, add `--allow-non-local` to live `inferdoctor perf` smoke tests. Never send private documents or secrets in smoke-test prompts.
 {extra}
 
 ## Validate This Template
@@ -728,7 +734,9 @@ Enable streaming, warm up the endpoint before demos, reduce context size, or use
 Run:
 
 ```bash
-inferdoctor perf streaming --endpoint http://127.0.0.1:8000/v1 --model local-model
+inferdoctor perf streaming --endpoint http://127.0.0.1:8000/v1 --model local-model --format json --output before.json
+inferdoctor perf baseline create --report before.json --name before
+inferdoctor optimize plan --report before.json --goal customer-service
 inferdoctor optimize endpoint --runtime vllm --vram 24 --model-size 14b
 inferdoctor model fit --size 14b --quant q4 --vram 24
 inferdoctor recommend --goal customer-service --vram 24

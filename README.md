@@ -6,14 +6,15 @@
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.9%2B-blue.svg)](pyproject.toml)
 
-**InferDoctor helps developers diagnose, plan, bootstrap, measure, and optimize local AI apps.**
+**InferDoctor helps developers diagnose, build, measure, compare, and optimize local or self-hosted AI apps.**
 
-Diagnose what is broken. Choose a reasonable stack. Generate a starter app. Validate it. Measure responsiveness. Then improve the user experience before a demo or prototype.
+Diagnose what is broken. Choose a reasonable stack. Generate a starter app. Validate it. Measure responsiveness. Save a baseline. Compare after a change. Then verify whether the user experience actually improved.
 
 Local AI setup often fails for unclear reasons: ports, CUDA, drivers, runtimes,
-OpenAI-compatible endpoints, model size, and app scaffolding all interact.
-InferDoctor gives you one command for stack health, then a beginner-friendly path
-from diagnosis to a small generated app.
+OpenAI-compatible endpoints, model size, app scaffolding, streaming behavior, and
+RAG latency all interact. InferDoctor gives you one command for stack health, then
+a beginner-friendly path from diagnosis to a small generated app and a bounded
+performance feedback loop.
 
 Use it to:
 
@@ -21,7 +22,8 @@ Use it to:
 - estimate what your machine can realistically run with clear heuristic caveats;
 - choose a practical local AI stack for a goal such as customer service, document Q&A, or a local API;
 - generate, validate, and smoke-test starter projects without contacting a model endpoint;
-- measure local endpoint responsiveness with bounded smoke tests;
+- measure local, LAN, or private endpoint responsiveness with bounded smoke tests;
+- save sanitized performance baselines and compare before/after changes;
 - get practical TTFT, streaming, TPS, cold/warm, endpoint, and RAG UX optimization advice.
 
 It is lightweight and read-only by default. It does not install AI runtimes,
@@ -53,17 +55,19 @@ python -m pip install -e ".[dev]"
 
 ```bash
 inferdoctor
+inferdoctor quickstart customer-service
 inferdoctor template list
 inferdoctor stack plan --goal customer-service --vram 24
 inferdoctor template create customer-service --output ./customer-service-demo
 inferdoctor template validate ./customer-service-demo
 inferdoctor template smoke-test ./customer-service-demo
-inferdoctor perf streaming --endpoint http://127.0.0.1:8000/v1 --model local-model --runs 2 --warmup 1
-inferdoctor optimize endpoint --runtime vllm --vram 24 --model-size 14b --streaming
-inferdoctor optimize rag --top-k 8 --ttft 2.5 --streaming
+inferdoctor perf streaming --endpoint http://127.0.0.1:8000/v1 --model local-model --runs 2 --warmup 1 --format json --output before.json
+inferdoctor perf baseline create --report before.json --name before
+inferdoctor perf compare before.json after.json
+inferdoctor optimize plan --report before.json --goal customer-service
 ```
 
-On the development branch, v0.5 starter workflows also include optional file generation commands:
+Starter workflows also include optional file generation commands:
 
 ```bash
 inferdoctor template compose customer-service --output ./compose-customer-service
@@ -73,22 +77,48 @@ inferdoctor template registry
 
 These commands generate local files only. They do not pull Docker images, start containers, install runtimes, call endpoints, download models, or run inference.
 
-## Performance UX Smoke Tests
+## Closed-Loop Performance UX
 
 Reachable endpoints are not enough. Local AI apps also need acceptable user experience: first token should appear quickly, streaming should work when enabled, RAG retrieval should show progress, and demos should avoid cold-start surprises.
 
 ```bash
 inferdoctor perf endpoint --endpoint http://127.0.0.1:8000/v1 --model local-model
-inferdoctor perf streaming --endpoint http://127.0.0.1:8000/v1 --model local-model --runs 2 --warmup 1
+inferdoctor perf streaming --endpoint http://127.0.0.1:8000/v1 --model local-model --runs 2 --warmup 1 --format json --output before.json
+inferdoctor perf baseline create --report before.json --name before
+# make one runtime, model, prompt, streaming, or RAG change
+inferdoctor perf streaming --endpoint http://127.0.0.1:8000/v1 --model local-model --format json --output after.json
+inferdoctor perf compare before.json after.json
+inferdoctor optimize plan --baseline before.json --candidate after.json --goal customer-service
 inferdoctor optimize endpoint --runtime vllm --vram 24 --model-size 14b --streaming
 inferdoctor optimize rag --top-k 8 --ttft 2.5 --streaming
 ```
 
 These are smoke tests and heuristic suggestions, not formal benchmarks. InferDoctor does not download models, start runtimes, run long load tests, evaluate model quality, or modify system settings.
 
+For LAN or private endpoints you control, live `inferdoctor perf` smoke tests require explicit `--allow-non-local`. InferDoctor redacts endpoint credentials in saved reports and baselines.
+
+## Two Main Tracks
+
+Application track:
+
+```bash
+inferdoctor quickstart customer-service
+inferdoctor template create customer-service --output ./customer-service-demo
+inferdoctor template validate ./customer-service-demo
+inferdoctor template smoke-test ./customer-service-demo
+```
+
+Performance track:
+
+```bash
+inferdoctor perf baseline create --report before.json --name before
+inferdoctor perf compare before.json after.json
+inferdoctor optimize plan --report after.json
+```
+
 ## Language Support
 
-InferDoctor v0.5 starts with first-step localization for the health dashboard and `inferdoctor check` console summary.
+InferDoctor includes first-step localization for the health dashboard and `inferdoctor check` console summary.
 
 ```bash
 inferdoctor --language zh
@@ -97,6 +127,8 @@ inferdoctor check --language en
 ```
 
 Supported values are `auto`, `en`, `zh`, and `ja`. `auto` follows the local environment when it can be detected. Other commands, generated templates, JSON schemas, Markdown reports, and structured field names may remain English in this first i18n release so scripts and issue reports stay stable. Unsupported language values are rejected instead of silently falling back.
+
+See [Internationalization](https://github.com/anguoyang/inferdoctor/blob/main/docs/i18n.md) for current scope and contribution notes.
 
 
 Model recommendation tools help you choose a model. InferDoctor helps you
@@ -140,7 +172,7 @@ More screenshot-friendly samples:
 - [`examples/demo_health_dashboard.txt`](https://github.com/anguoyang/inferdoctor/blob/main/examples/demo_health_dashboard.txt)
 - [`examples/demo_scenarios.txt`](https://github.com/anguoyang/inferdoctor/blob/main/examples/demo_scenarios.txt)
 - [`examples/demo_profile.md`](https://github.com/anguoyang/inferdoctor/blob/main/examples/demo_profile.md)
-- [`examples/demo_outputs/`](https://github.com/anguoyang/inferdoctor/tree/main/examples/demo_outputs) - v0.4 health, capacity, recommendation, stack plan, bootstrap, validation, smoke-test, and model-fit demos
+- [`examples/demo_outputs/`](https://github.com/anguoyang/inferdoctor/tree/main/examples/demo_outputs) - health, capacity, recommendation, stack plan, bootstrap, validation, smoke-test, and model-fit demos
 
 Beginner setup docs and template examples:
 
@@ -156,6 +188,9 @@ Beginner setup docs and template examples:
 - [`docs/performance/rag_latency.md`](https://github.com/anguoyang/inferdoctor/blob/main/docs/performance/rag_latency.md)
 - [`docs/performance/demo_readiness.md`](https://github.com/anguoyang/inferdoctor/blob/main/docs/performance/demo_readiness.md)
 - [`docs/performance/metric_definitions.md`](https://github.com/anguoyang/inferdoctor/blob/main/docs/performance/metric_definitions.md)
+- [`docs/performance/performance_reports.md`](https://github.com/anguoyang/inferdoctor/blob/main/docs/performance/performance_reports.md)
+- [`examples/reference_apps/customer_service/`](https://github.com/anguoyang/inferdoctor/tree/main/examples/reference_apps/customer_service)
+- [`examples/reference_apps/local_doc_qa/`](https://github.com/anguoyang/inferdoctor/tree/main/examples/reference_apps/local_doc_qa)
 - [`docs/performance/customer_experience_checklist.md`](https://github.com/anguoyang/inferdoctor/blob/main/docs/performance/customer_experience_checklist.md)
 
 ## From Broken Stack to Working App

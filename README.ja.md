@@ -10,7 +10,7 @@ InferDoctor は、Ollama、vLLM、SGLang、Xinference、Dify、CUDA、NVIDIA ド
 inferdoctor
 ```
 
-モデルを選ぶだけのツールではありません。InferDoctor は、診断、スタック計画、starter template、テンプレート検証、軽量な性能 smoke test、TTFT / streaming / RAG UX の改善アドバイスまでをつなげます。
+モデルを選ぶだけのツールではありません。InferDoctor は、診断、スタック計画、starter template、テンプレート検証、軽量な性能 smoke test、baseline 保存、最適化前後の比較、TTFT / streaming / RAG UX の改善アドバイスまでをつなげます。
 
 ## インストール
 
@@ -40,6 +40,7 @@ python -m pip install -e ".[dev]"
 inferdoctor                                      # 全体のヘルスチェック
 inferdoctor --language ja                       # 日本語ヘルスダッシュボード
 inferdoctor template list                       # starter template の一覧
+inferdoctor quickstart customer-service          # guided setup plan
 inferdoctor stack plan --goal customer-service  # 目的に合う手順を表示
 inferdoctor template create customer-service --output ./customer-service-demo
 inferdoctor template validate ./customer-service-demo
@@ -55,17 +56,23 @@ inferdoctor template smoke-test ./customer-service-demo
 ```bash
 inferdoctor perf endpoint --endpoint http://127.0.0.1:8000/v1 --model local-model
 inferdoctor perf streaming --endpoint http://127.0.0.1:8000/v1 --model local-model --runs 2 --warmup 1
+inferdoctor perf baseline create --report before.json --name before
+inferdoctor perf compare before.json after.json
+inferdoctor optimize plan --report after.json --goal customer-service
 inferdoctor optimize endpoint --runtime vllm --vram 24 --model-size 14b --streaming
 inferdoctor optimize rag --top-k 8 --ttft 2.5 --streaming
 ```
 
-InferDoctor v0.5 では、次のような性能 UX 情報を扱います。
+InferDoctor v0.6 では、次のような性能 UX 情報を扱います。
 
 - TTFT: time to first token。最初のユーザー可視テキストが出るまでの時間です。
 - total latency: レスポンス完了までの総時間です。
 - generation duration: 最初の出力から完了までの生成時間です。
 - TPS: tokens per second。API usage が信頼できる場合は exact、なければ estimated と明示します。
 - bounded runs / warmup: 最大実行回数を制限し、cold / warm の差を軽く確認します。
+- baseline: sanitized な smoke test 結果を保存します。
+- compare: 最適化前後の TTFT、latency、TPS、成功率を比較します。
+- optimization plan: 観測値に基づいて検証可能な次の手順を出します。
 - streaming check: stream=true が実際に user-visible content を返すか確認します。
 
 これらは formal benchmark ではありません。短いプロンプトで行う timeout-bounded smoke test です。モデル品質、長時間負荷、最大スループット、実運用 SLA は測定しません。
@@ -82,7 +89,7 @@ inferdoctor optimize rag --docs 1000 --chunks 5000 --top-k 8 --ttft 2.5 --stream
 
 ## first-step i18n
 
-v0.5 では、ヘルスダッシュボードと `inferdoctor check` の console summary について、英語・中国語・日本語の first-step i18n を提供します。
+v0.5 以降では、ヘルスダッシュボードと `inferdoctor check` の console summary について、英語・中国語・日本語の first-step i18n を提供します。
 
 ```bash
 inferdoctor --language auto
@@ -116,6 +123,10 @@ InferDoctor は、次のような starter project を生成できます。
 - local-doc-qa: Markdown ドキュメントの軽量 Q&A
 
 テンプレート生成は指定した出力ディレクトリにファイルを書くだけです。依存関係のインストール、モデルのダウンロード、推論実行は行いません。
+
+## ローカル / LAN / プライベート endpoint
+
+InferDoctor は localhost だけでなく、自分で管理する LAN または private OpenAI-compatible endpoint も扱えます。live smoke test で非ローカル endpoint に短いプロンプトを送る場合は、明示的に `--allow-non-local` を付けます。public endpoint へ自動的に送信することはありません。endpoint URL 内の credential や key らしき query は report や baseline で redaction されます。
 
 ## 安全ポリシー
 
