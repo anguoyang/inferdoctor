@@ -1,84 +1,97 @@
 # InferDoctor 日本語クイックスタート
 
-[English README](README.md)
+[English README](https://github.com/anguoyang/inferdoctor/blob/main/README.md)
 
-**ローカル AI スタックを診断し、アプリ作成の次の一手を案内します。**
+**InferDoctor は、ローカルまたはセルフホスト AI アプリの診断、セットアップ、性能 UX 改善を支援する軽量 CLI です。**
 
-InferDoctor は、ローカル AI スタックの doctor 兼 setup assistant です。Ollama、vLLM、SGLang、Xinference、Dify、CUDA、NVIDIA ドライバ、llama.cpp server、LM Studio、Open WebUI などを軽量に診断し、このマシンで何を作れそうか、どのテンプレートから始めるべきかを示します。
+InferDoctor は、Ollama、vLLM、SGLang、Xinference、Dify、CUDA、NVIDIA ドライバ、llama.cpp server、LM Studio、Open WebUI などを安全に確認し、ローカル AI スタックがなぜ動かないのか、次に何を試すべきかを示します。
 
 ```bash
 inferdoctor
 ```
 
-モデル推薦だけを行うツールではありません。InferDoctor は、ローカル AI スタックがなぜ動かないのかを調べ、実用的なセットアップ手順と starter template につなげます。
-
-## なぜローカル AI スタックは壊れやすいのか
-
-アプリケーションから見ると同じエラーでも、原因は複数あります。
-
-- NVIDIA ドライバや `nvidia-smi` が見えない
-- CUDA toolkit や `nvcc` がない
-- Ollama、vLLM、SGLang などの runtime が起動していない
-- `/v1/models` の URL が間違っている
-- Dify や Open WebUI のポート設定が違う
-- Docker daemon に接続できない
-- 認証、リバースプロキシ、JSON 形式が期待と違う
-
-InferDoctor は各レイヤーを分けて確認し、次に試すべきコマンドを表示します。
+モデルを選ぶだけのツールではありません。InferDoctor は、診断、スタック計画、starter template、テンプレート検証、軽量な性能 smoke test、TTFT / streaming / RAG UX の改善アドバイスまでをつなげます。
 
 ## インストール
 
-Python 3.9 以上が必要です。PyPI 公開前の開発版は GitHub からインストールしてください。
+PyPI からインストールできます。
+
+```bash
+pip install inferdoctor
+```
+
+開発版を GitHub から試す場合:
 
 ```bash
 python -m pip install "git+https://github.com/anguoyang/inferdoctor.git@dev"
-inferdoctor
 ```
 
-開発用に clone する場合:
+ローカル開発用に clone する場合:
 
 ```bash
 git clone https://github.com/anguoyang/inferdoctor.git
 cd inferdoctor
 python -m pip install -e ".[dev]"
-inferdoctor
 ```
 
 ## クイックスタート
 
 ```bash
 inferdoctor                                      # 全体のヘルスチェック
-inferdoctor recommend --goal customer-service   # 目的に合う構成を提案
-inferdoctor stack plan --goal customer-service  # 次に実行する手順を表示
-inferdoctor template list                       # 利用できるテンプレート
+inferdoctor --language ja                       # 日本語ヘルスダッシュボード
+inferdoctor template list                       # starter template の一覧
+inferdoctor stack plan --goal customer-service  # 目的に合う手順を表示
 inferdoctor template create customer-service --output ./customer-service-demo
 inferdoctor template validate ./customer-service-demo
-inferdoctor model fit --size 14b --quant q4 --vram 24
+inferdoctor template smoke-test ./customer-service-demo
 ```
 
-生成されたテンプレートは OpenAI 互換のローカル endpoint を前提にしています。`config.yaml` または `.env` で Ollama、LM Studio、vLLM、SGLang などの endpoint を指定できます。
+生成されたテンプレートは、OpenAI 互換のローカル endpoint を前提にしています。`config.yaml` または `.env` で Ollama、LM Studio、vLLM、SGLang などの endpoint を指定できます。
 
-## 出力例
+## 性能 UX smoke test
 
-```text
-InferDoctor - Local AI Stack Health Check
-=========================================================
-Overall Health: 82 / 100  (Mostly healthy)
-Stack Summary: 3 working | 2 needs attention | 3 optional/offline | 0 failed
+ローカル AI アプリでは、endpoint が到達可能なだけでは不十分です。ユーザー体験では、最初の文字が早く出るか、streaming が有効か、RAG の検索中に進捗が見えるか、cold start がデモを遅くしないかが重要です。
 
-Component   Status   Summary
------------ -------- --------------------------------------------------
-System      PASS     System information collected
-NVIDIA      PASS     1 NVIDIA GPU(s) detected
-CUDA        SKIP     CUDA compiler was not found
-Ollama      PASS     Ollama CLI and API are available
-vLLM        WARN     vLLM models route returned HTTP 404
-SGLang      SKIP     SGLang endpoint is not reachable
-
-Top recommended fixes (most useful first):
-1. vLLM: vLLM models route returned HTTP 404
-   Try: inferdoctor check vllm --endpoint http://127.0.0.1:8000/v1
+```bash
+inferdoctor perf endpoint --endpoint http://127.0.0.1:8000/v1 --model local-model
+inferdoctor perf streaming --endpoint http://127.0.0.1:8000/v1 --model local-model --runs 2 --warmup 1
+inferdoctor optimize endpoint --runtime vllm --vram 24 --model-size 14b --streaming
+inferdoctor optimize rag --top-k 8 --ttft 2.5 --streaming
 ```
+
+InferDoctor v0.5 では、次のような性能 UX 情報を扱います。
+
+- TTFT: time to first token。最初のユーザー可視テキストが出るまでの時間です。
+- total latency: レスポンス完了までの総時間です。
+- generation duration: 最初の出力から完了までの生成時間です。
+- TPS: tokens per second。API usage が信頼できる場合は exact、なければ estimated と明示します。
+- bounded runs / warmup: 最大実行回数を制限し、cold / warm の差を軽く確認します。
+- streaming check: stream=true が実際に user-visible content を返すか確認します。
+
+これらは formal benchmark ではありません。短いプロンプトで行う timeout-bounded smoke test です。モデル品質、長時間負荷、最大スループット、実運用 SLA は測定しません。
+
+## RAG と endpoint の最適化アドバイス
+
+```bash
+inferdoctor optimize endpoint --runtime ollama --streaming --ttft 1.5 --tps 40
+inferdoctor optimize endpoint --runtime vllm --vram 24 --model-size 14b --quant q4
+inferdoctor optimize rag --docs 1000 --chunks 5000 --top-k 8 --ttft 2.5 --streaming
+```
+
+アドバイスはヒューリスティックです。InferDoctor は、与えられた観測値から、streaming、warmup、context 長、model size、quantization、RAG の top_k、rerank latency、retrieval progress などを見直すための実用的な次の手順を提示します。
+
+## first-step i18n
+
+v0.5 では、ヘルスダッシュボードと `inferdoctor check` の console summary について、英語・中国語・日本語の first-step i18n を提供します。
+
+```bash
+inferdoctor --language auto
+inferdoctor --language zh
+inferdoctor --language ja
+inferdoctor check --language en
+```
+
+対象外の command、生成テンプレート、JSON schema、Markdown report の機械可読フィールド名は英語のまま残る場合があります。これは自動化や issue report の互換性を保つためです。
 
 ## 対応しているチェック
 
@@ -110,15 +123,16 @@ InferDoctor は軽量で、デフォルトでは読み取り専用です。
 
 - AI runtime、CUDA、GPU framework をインストールしません。
 - モデルをダウンロードしません。
-- 推論を実行しません。
 - systemd、Docker container、OS 設定を変更しません。
+- 長時間 benchmark や負荷試験を実行しません。
 - GPU がない CPU-only マシンでも動作します。
+- live endpoint smoke test は短く、timeout-bounded です。
 
 ## 次に読むもの
 
-- [English README](README.md)
-- [Getting Started](docs/getting_started.md)
-- [Templates](docs/templates.md)
-- [Stack Recommendations](docs/recommendations.md)
-- [Model Fit Advisor](docs/model_fit.md)
-- [Release Checklist](docs/release_checklist.md)
+- [English README](https://github.com/anguoyang/inferdoctor/blob/main/README.md)
+- [Getting Started](https://github.com/anguoyang/inferdoctor/blob/main/docs/getting_started.md)
+- [Templates](https://github.com/anguoyang/inferdoctor/blob/main/docs/templates.md)
+- [Recommendations](https://github.com/anguoyang/inferdoctor/blob/main/docs/recommendations.md)
+- [Model Fit Advisor](https://github.com/anguoyang/inferdoctor/blob/main/docs/model_fit.md)
+- [Performance Metric Definitions](https://github.com/anguoyang/inferdoctor/blob/main/docs/performance/metric_definitions.md)

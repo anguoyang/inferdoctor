@@ -1,6 +1,6 @@
 # InferDoctor
 
-[日本語クイックスタート](README.ja.md)
+[日本語クイックスタート](https://github.com/anguoyang/inferdoctor/blob/main/README.ja.md)
 
 [![Tests](https://github.com/anguoyang/inferdoctor/actions/workflows/tests.yml/badge.svg)](https://github.com/anguoyang/inferdoctor/actions/workflows/tests.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
@@ -134,29 +134,29 @@ Top recommended fixes (most useful first):
 
 More screenshot-friendly samples:
 
-- [`examples/console_cpu_only.txt`](examples/console_cpu_only.txt)
-- [`examples/console_with_ollama.txt`](examples/console_with_ollama.txt)
-- [`examples/console_with_gpu.txt`](examples/console_with_gpu.txt)
-- [`examples/demo_health_dashboard.txt`](examples/demo_health_dashboard.txt)
-- [`examples/demo_scenarios.txt`](examples/demo_scenarios.txt)
-- [`examples/demo_profile.md`](examples/demo_profile.md)
-- [`examples/demo_outputs/`](examples/demo_outputs/) - v0.4 health, capacity, recommendation, stack plan, bootstrap, validation, smoke-test, and model-fit demos
+- [`examples/console_cpu_only.txt`](https://github.com/anguoyang/inferdoctor/blob/main/examples/console_cpu_only.txt)
+- [`examples/console_with_ollama.txt`](https://github.com/anguoyang/inferdoctor/blob/main/examples/console_with_ollama.txt)
+- [`examples/console_with_gpu.txt`](https://github.com/anguoyang/inferdoctor/blob/main/examples/console_with_gpu.txt)
+- [`examples/demo_health_dashboard.txt`](https://github.com/anguoyang/inferdoctor/blob/main/examples/demo_health_dashboard.txt)
+- [`examples/demo_scenarios.txt`](https://github.com/anguoyang/inferdoctor/blob/main/examples/demo_scenarios.txt)
+- [`examples/demo_profile.md`](https://github.com/anguoyang/inferdoctor/blob/main/examples/demo_profile.md)
+- [`examples/demo_outputs/`](https://github.com/anguoyang/inferdoctor/tree/main/examples/demo_outputs) - v0.4 health, capacity, recommendation, stack plan, bootstrap, validation, smoke-test, and model-fit demos
 
 Beginner setup docs and template examples:
 
-- [`docs/beginner_guide.md`](docs/beginner_guide.md)
-- [`docs/local_ai_stacks.md`](docs/local_ai_stacks.md)
-- [`docs/openai_compatible_endpoints.md`](docs/openai_compatible_endpoints.md)
-- [`docs/template_projects.md`](docs/template_projects.md)
-- [`docs/template_registry.md`](docs/template_registry.md)
-- [`docs/hardware_and_model_fit.md`](docs/hardware_and_model_fit.md)
-- [`examples/templates/`](examples/templates/)
-- [`docs/performance/local_ai_user_experience.md`](docs/performance/local_ai_user_experience.md)
-- [`docs/performance/ttft_tps_streaming.md`](docs/performance/ttft_tps_streaming.md)
-- [`docs/performance/rag_latency.md`](docs/performance/rag_latency.md)
-- [`docs/performance/demo_readiness.md`](docs/performance/demo_readiness.md)
-- [`docs/performance/metric_definitions.md`](docs/performance/metric_definitions.md)
-- [`docs/performance/customer_experience_checklist.md`](docs/performance/customer_experience_checklist.md)
+- [`docs/beginner_guide.md`](https://github.com/anguoyang/inferdoctor/blob/main/docs/beginner_guide.md)
+- [`docs/local_ai_stacks.md`](https://github.com/anguoyang/inferdoctor/blob/main/docs/local_ai_stacks.md)
+- [`docs/openai_compatible_endpoints.md`](https://github.com/anguoyang/inferdoctor/blob/main/docs/openai_compatible_endpoints.md)
+- [`docs/template_projects.md`](https://github.com/anguoyang/inferdoctor/blob/main/docs/template_projects.md)
+- [`docs/template_registry.md`](https://github.com/anguoyang/inferdoctor/blob/main/docs/template_registry.md)
+- [`docs/hardware_and_model_fit.md`](https://github.com/anguoyang/inferdoctor/blob/main/docs/hardware_and_model_fit.md)
+- [`examples/templates/`](https://github.com/anguoyang/inferdoctor/tree/main/examples/templates)
+- [`docs/performance/local_ai_user_experience.md`](https://github.com/anguoyang/inferdoctor/blob/main/docs/performance/local_ai_user_experience.md)
+- [`docs/performance/ttft_tps_streaming.md`](https://github.com/anguoyang/inferdoctor/blob/main/docs/performance/ttft_tps_streaming.md)
+- [`docs/performance/rag_latency.md`](https://github.com/anguoyang/inferdoctor/blob/main/docs/performance/rag_latency.md)
+- [`docs/performance/demo_readiness.md`](https://github.com/anguoyang/inferdoctor/blob/main/docs/performance/demo_readiness.md)
+- [`docs/performance/metric_definitions.md`](https://github.com/anguoyang/inferdoctor/blob/main/docs/performance/metric_definitions.md)
+- [`docs/performance/customer_experience_checklist.md`](https://github.com/anguoyang/inferdoctor/blob/main/docs/performance/customer_experience_checklist.md)
 
 ## From Broken Stack to Working App
 
@@ -297,7 +297,7 @@ inferdoctor scenario openai-compatible-server
 
 Initial scenarios include local chatbot, RAG app, OpenAI-compatible server,
 Dify local RAG, GPU inference, and CPU-only fallback. See
-[`examples/scenario_readiness.txt`](examples/scenario_readiness.txt).
+[`examples/scenario_readiness.txt`](https://github.com/anguoyang/inferdoctor/blob/main/examples/scenario_readiness.txt).
 
 ## Troubleshooting Explain
 
@@ -429,8 +429,8 @@ inferdoctor report --format markdown --output report.md
 ```
 
 See the sanitized samples in
-[`examples/report_cpu_only.json`](examples/report_cpu_only.json) and
-[`examples/report_cpu_only.md`](examples/report_cpu_only.md).
+[`examples/report_cpu_only.json`](https://github.com/anguoyang/inferdoctor/blob/main/examples/report_cpu_only.json) and
+[`examples/report_cpu_only.md`](https://github.com/anguoyang/inferdoctor/blob/main/examples/report_cpu_only.md).
 
 ## Safe Diagnostic Profile
 
@@ -511,11 +511,11 @@ of probing the current machine.
 
 ## More Guides
 
-- [Getting started](docs/getting_started.md)
-- [Templates](docs/templates.md)
-- [Stack recommendations](docs/recommendations.md)
-- [Model fit advisor](docs/model_fit.md)
-- [PyPI release workflow](docs/pypi_release.md)
+- [Getting started](https://github.com/anguoyang/inferdoctor/blob/main/docs/getting_started.md)
+- [Templates](https://github.com/anguoyang/inferdoctor/blob/main/docs/templates.md)
+- [Stack recommendations](https://github.com/anguoyang/inferdoctor/blob/main/docs/recommendations.md)
+- [Model fit advisor](https://github.com/anguoyang/inferdoctor/blob/main/docs/model_fit.md)
+- [PyPI release workflow](https://github.com/anguoyang/inferdoctor/blob/main/docs/pypi_release.md)
 
 ## Development
 
@@ -527,7 +527,7 @@ pytest
 Tests use subprocess and HTTP mocks. They require no GPU, CUDA installation,
 local inference runtime, or internet access.
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) and [SECURITY.md](SECURITY.md).
+See [CONTRIBUTING.md](https://github.com/anguoyang/inferdoctor/blob/main/CONTRIBUTING.md) and [SECURITY.md](https://github.com/anguoyang/inferdoctor/blob/main/SECURITY.md).
 
 ## Roadmap
 
@@ -547,4 +547,4 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) and [SECURITY.md](SECURITY.md).
 
 ## License
 
-Licensed under the Apache License 2.0. See [LICENSE](LICENSE).
+Licensed under the Apache License 2.0. See [LICENSE](https://github.com/anguoyang/inferdoctor/blob/main/LICENSE).
