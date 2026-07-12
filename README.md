@@ -116,6 +116,29 @@ inferdoctor perf compare before.json after.json
 inferdoctor optimize plan --report after.json
 ```
 
+## Dify Integration Development
+
+InferDoctor v0.7 development adds Dify workflows for local, LAN, private, self-hosted, or explicitly approved public Dify applications connected to local or private models.
+
+```bash
+inferdoctor dify check
+inferdoctor dify template export local-private-rag --output ./dify-rag
+inferdoctor dify validate ./dify-rag
+inferdoctor dify smoke --kit ./dify-rag --dry-run
+inferdoctor dify perf --base-url http://127.0.0.1:5001/v1 --runs 2 --warmup 1 --format json --output dify-perf.json
+inferdoctor dify optimize --report dify-perf.json --kit ./dify-rag
+```
+
+The Dify workflow is read-only by default. It does not install Dify, import DSLs automatically, create knowledge bases, upload documents, store API keys, or treat smoke tests as formal benchmarks.
+
+Docs:
+
+- [Dify getting started](https://github.com/anguoyang/inferdoctor/blob/main/docs/dify/getting_started.md)
+- [Local / Private RAG Kit](https://github.com/anguoyang/inferdoctor/blob/main/docs/dify/local_private_rag.md)
+- [Dify compatibility](https://github.com/anguoyang/inferdoctor/blob/main/docs/dify/compatibility.md)
+- [Dify security](https://github.com/anguoyang/inferdoctor/blob/main/docs/dify/security.md)
+- [Dify reference example](https://github.com/anguoyang/inferdoctor/tree/main/examples/dify/local_private_rag)
+
 ## Language Support
 
 InferDoctor includes first-step localization for the health dashboard and `inferdoctor check` console summary.

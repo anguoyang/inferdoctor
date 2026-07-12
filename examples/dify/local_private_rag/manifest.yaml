@@ -1,0 +1,12 @@
+schema_version: inferdoctor.example.v1
+name: dify-local-private-rag-reference
+description: Public reference workflow for InferDoctor Dify Local / Private RAG Kit.
+safe_modes:
+  - offline kit validation
+  - dry-run smoke test
+  - optional tiny live app API smoke test
+does_not:
+  - install Dify
+  - import DSL automatically
+  - upload documents
+  - store API keys

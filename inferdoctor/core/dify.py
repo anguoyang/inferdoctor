@@ -208,6 +208,29 @@ class DifyAPIClient:
         started = time.perf_counter()
         lines: List[bytes] = []
         content_type = ""
+        first_event_at: Optional[float] = None
+        first_text_at: Optional[float] = None
+        frame_event: Optional[str] = None
+        frame_data: List[str] = []
+
+        def observe_frame(now: float) -> None:
+            nonlocal first_event_at, first_text_at, frame_event, frame_data
+            if not frame_data and frame_event is None:
+                return
+            data_text = "\n".join(frame_data)
+            payload_obj: Any = None
+            if data_text and data_text != "[DONE]":
+                try:
+                    payload_obj = json.loads(data_text)
+                except json.JSONDecodeError:
+                    payload_obj = None
+            if first_event_at is None and frame_event != "ping":
+                first_event_at = now
+            if first_text_at is None and _visible_text(payload_obj):
+                first_text_at = now
+            frame_event = None
+            frame_data = []
+
         try:
             with self._opener.open(request, timeout=self.timeout) as response:
                 content_type = response.headers.get("Content-Type", "")
@@ -216,17 +239,28 @@ class DifyAPIClient:
                     line = response.readline(65536)
                     if not line:
                         break
+                    now = time.perf_counter()
                     total += len(line)
                     if total > 1024 * 1024:
                         raise DifyAPIError("Dify streaming response exceeded the 1 MiB safety limit", category="response_too_large")
                     lines.append(line)
+                    decoded = line.decode("utf-8", errors="replace").rstrip("\r\n")
+                    if decoded == "":
+                        observe_frame(now)
+                    elif decoded.startswith("event:"):
+                        frame_event = decoded.split(":", 1)[1].strip()
+                    elif decoded.startswith("data:"):
+                        frame_data.append(decoded.split(":", 1)[1].lstrip())
                 ended = time.perf_counter()
+                observe_frame(ended)
         except urllib.error.HTTPError as exc:
             raise DifyAPIError(_http_error_message(exc), status_code=exc.code, category=_status_category(exc.code)) from exc
         except urllib.error.URLError as exc:
             raise DifyAPIError("Could not reach Dify endpoint: {0}".format(redact_secret_text(str(exc.reason), [self.api_key])), category="network_error") from exc
         events = parse_sse_lines(lines)
         metrics = interpret_dify_events(events, started_at=started, ended_at=ended)
+        metrics["first_event_latency_seconds"] = round(first_event_at - started, 6) if first_event_at is not None else None
+        metrics["ttft_seconds"] = round(first_text_at - started, 6) if first_text_at is not None else None
         metrics["content_type"] = content_type
         return metrics
 
