@@ -4,6 +4,21 @@
 
 - No unreleased changes.
 
+## v0.5.1
+
+### Documentation Hotfix
+
+- Fixed repository-relative links in the PyPI long description by converting README links to stable GitHub URLs.
+- Fixed the Japanese quickstart link when rendered on PyPI.
+- Updated Japanese installation instructions to use `pip install inferdoctor` as the primary path.
+- Updated Japanese documentation for v0.5 performance UX and first-step i18n features.
+- Added offline README link validation to prevent future PyPI long-description link regressions.
+
+### Safety
+
+- No runtime, API, metric-schema, or performance behavior changes.
+- No model downloads, runtime installation, or inference execution features were added.
+
 ## v0.5.0
 
 ### Development Notes
