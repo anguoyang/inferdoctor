@@ -4,11 +4,12 @@ import json
 import os
 import platform
 import re
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from inferdoctor.core.perf import sanitize_endpoint
+from inferdoctor.core.perf import REPORT_SCHEMA_VERSION, sanitize_endpoint
 
 BASELINE_SCHEMA_VERSION = "inferdoctor.perf.baseline.v1"
 
@@ -74,13 +75,20 @@ def _metrics_from_report(report: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _is_supported_perf_report_schema(schema_version: str) -> bool:
+    if schema_version == REPORT_SCHEMA_VERSION:
+        return True
+    return schema_version.startswith("inferdoctor.perf.v")
+
+
 def baseline_from_report(
     report: Dict[str, Any],
     name: Optional[str] = None,
     runtime: Optional[str] = None,
     hardware_summary: Optional[str] = None,
 ) -> Dict[str, Any]:
-    if report.get("schema_version") == BASELINE_SCHEMA_VERSION:
+    schema_version = str(report.get("schema_version", ""))
+    if schema_version == BASELINE_SCHEMA_VERSION:
         baseline = dict(report)
         if name:
             baseline["name"] = safe_baseline_name(name, report)
@@ -89,8 +97,10 @@ def baseline_from_report(
         if hardware_summary:
             baseline["hardware_summary"] = hardware_summary
         return baseline
-    if not str(report.get("schema_version", "")).startswith("inferdoctor.perf."):
-        raise ValueError("Expected an InferDoctor performance report JSON document")
+    if schema_version.startswith("inferdoctor.perf.baseline."):
+        raise ValueError("Unsupported InferDoctor baseline schema version: {0}".format(schema_version))
+    if not _is_supported_perf_report_schema(schema_version):
+        raise ValueError("Expected an InferDoctor endpoint or streaming performance report JSON document")
     experience = report.get("experience_read") if isinstance(report.get("experience_read"), dict) else {}
     baseline = {
         "schema_version": BASELINE_SCHEMA_VERSION,
@@ -129,7 +139,11 @@ def save_baseline(
 ) -> Path:
     target = Path(output).expanduser() if output else baseline_path(str(baseline.get("name") or "baseline"), directory)
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(json.dumps(baseline, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    payload = json.dumps(baseline, indent=2, sort_keys=True) + "\n"
+    with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=target.parent, prefix=target.name + ".", suffix=".tmp", delete=False) as handle:
+        temp_path = Path(handle.name)
+        handle.write(payload)
+    temp_path.replace(target)
     return target
 
 

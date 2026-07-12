@@ -114,3 +114,27 @@ def test_perf_baseline_cli_accepts_explicit_output_path(tmp_path, monkeypatch, c
     assert exit_code == 0
     assert output_path.exists()
     assert "shared-baseline.json" in capsys.readouterr().out
+
+
+
+def test_baseline_create_rejects_non_report_perf_documents(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("INFERDOCTOR_BASELINE_DIR", str(tmp_path / "baselines"))
+    compare_path = tmp_path / "comparison.json"
+    compare_path.write_text(json.dumps({"schema_version": "inferdoctor.perf.compare.v1"}), encoding="utf-8")
+
+    exit_code = main(["perf", "baseline", "create", "--report", str(compare_path), "--name", "bad"])
+
+    assert exit_code == 2
+    assert "endpoint or streaming performance report" in capsys.readouterr().err
+
+
+def test_baseline_show_reports_unsupported_schema_without_traceback(tmp_path, monkeypatch, capsys):
+    baseline_dir = tmp_path / "baselines"
+    baseline_dir.mkdir()
+    monkeypatch.setenv("INFERDOCTOR_BASELINE_DIR", str(baseline_dir))
+    (baseline_dir / "old.json").write_text(json.dumps({"schema_version": "inferdoctor.perf.baseline.v999"}), encoding="utf-8")
+
+    exit_code = main(["perf", "baseline", "show", "old"])
+
+    assert exit_code == 2
+    assert "Unsupported InferDoctor baseline schema version" in capsys.readouterr().err
