@@ -6,6 +6,7 @@ from typing import List, Optional
 
 from inferdoctor.core.recommendations import StackRecommendation, recommend_stack
 from inferdoctor.core.templates import create_template_project
+from inferdoctor.i18n import t
 
 
 @dataclass(frozen=True)
@@ -103,11 +104,11 @@ def build_stack_plan(
     )
 
 
-def render_stack_plan(plan: LocalAIStackPlan) -> str:
+def render_stack_plan(plan: LocalAIStackPlan, language: str = "auto") -> str:
     rec = plan.recommendation
     vram = "unknown" if rec.vram_gib is None else "{0:g} GiB".format(rec.vram_gib)
     lines = [
-        "InferDoctor Local AI Stack Plan",
+        t("stack_plan.title", language),
         "=" * 57,
         "Goal: {0}".format(rec.goal),
         "Preference: {0}".format(rec.preference),
@@ -125,12 +126,12 @@ def render_stack_plan(plan: LocalAIStackPlan) -> str:
     lines.extend("  - {0}".format(item) for item in rec.use_case_guidance)
     lines.extend([
         "",
-        "Required components:",
+        t("stack_plan.required_components", language),
     ])
     lines.extend("  - {0}".format(component) for component in plan.required_components)
-    lines.extend(["", "Optional components:"])
+    lines.extend(["", t("stack_plan.optional_components", language)])
     lines.extend("  - {0}".format(component) for component in plan.optional_components)
-    lines.extend(["", "Step-by-step next actions:"])
+    lines.extend(["", t("stack_plan.step_by_step", language)])
     lines.extend("  {0}. {1}".format(index, step) for index, step in enumerate(plan.steps, start=1))
     lines.extend(["", "Commands to run:"])
     lines.extend("  {0}".format(command) for command in plan.commands)
@@ -190,7 +191,7 @@ def build_stack_bootstrap_plan(
     )
 
 
-def render_stack_bootstrap_plan(plan: StackBootstrapPlan) -> str:
+def render_stack_bootstrap_plan(plan: StackBootstrapPlan, language: str = "auto") -> str:
     rec = plan.recommendation
     lines = [
         "InferDoctor Stack Bootstrap Plan (Dry Run)",
@@ -330,7 +331,7 @@ def create_stack_bootstrap_project(
     return StackBootstrapFiles(recommendation=plan.recommendation, output_dir=output_dir, written=written)
 
 
-def render_stack_bootstrap_files(result: StackBootstrapFiles) -> str:
+def render_stack_bootstrap_files(result: StackBootstrapFiles, language: str = "auto") -> str:
     lines = [
         "InferDoctor Stack Bootstrap Files Created",
         "=" * 57,

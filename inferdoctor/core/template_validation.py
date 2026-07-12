@@ -7,6 +7,8 @@ import subprocess
 import sys
 from typing import List
 
+from inferdoctor.i18n import t
+
 
 @dataclass(frozen=True)
 class TemplateValidationItem:
@@ -307,23 +309,23 @@ def smoke_test_template_project(path: str, timeout: float = 5.0) -> TemplateSmok
     return TemplateSmokeReport(path=root, template_type=template_type, items=items)
 
 
-def render_template_smoke_test(report: TemplateSmokeReport) -> str:
+def render_template_smoke_test(report: TemplateSmokeReport, language: str = "auto") -> str:
     lines = [
-        "InferDoctor Template Smoke Test",
+        t("template_validation.smoke_title", language),
         "=" * 57,
         "Path: {0}".format(report.path),
         "Detected template: {0}".format(report.template_type),
         "Overall status: {0}".format(report.status),
         "Project Readiness: {0} / 100 (heuristic)".format(report.readiness_score),
         "",
-        "Safe commands:",
+        t("template_validation.checks", language),
     ]
     for item in report.items:
         command = _command_display(item.command) if item.command else "n/a"
         lines.append("  {0:<16} {1:<4} {2}".format(item.name, item.status, item.summary))
         lines.append("    Command: {0}".format(command))
     fixes = [item for item in report.items if item.status in {"WARN", "FAIL"} and item.fix]
-    lines.extend(["", "Top fixes:"])
+    lines.extend(["", t("template_validation.top_fixes", language)])
     if fixes:
         for index, item in enumerate(fixes[:3], start=1):
             lines.append("  {0}. {1}: {2}".format(index, item.name, item.fix))
@@ -341,21 +343,21 @@ def render_template_smoke_test(report: TemplateSmokeReport) -> str:
     return "\n".join(lines)
 
 
-def render_template_validation(report: TemplateValidationReport) -> str:
+def render_template_validation(report: TemplateValidationReport, language: str = "auto") -> str:
     lines = [
-        "InferDoctor Template Validation",
+        t("template_validation.title", language),
         "=" * 57,
         "Path: {0}".format(report.path),
         "Detected template: {0}".format(report.template_type),
         "Overall status: {0}".format(report.status),
         "Project Readiness: {0} / 100 (heuristic)".format(report.readiness_score),
         "",
-        "Checks:",
+        t("template_validation.checks", language),
     ]
     for item in report.items:
         lines.append("  {0:<18} {1:<4} {2}".format(item.name, item.status, item.summary))
     fixes = [item for item in report.items if item.status in {"WARN", "FAIL"} and item.fix]
-    lines.extend(["", "Top fixes:"])
+    lines.extend(["", t("template_validation.top_fixes", language)])
     if fixes:
         for index, item in enumerate(fixes[:3], start=1):
             lines.append("  {0}. {1}: {2}".format(index, item.name, item.fix))
@@ -378,7 +380,7 @@ def render_template_validation(report: TemplateValidationReport) -> str:
         next_commands = ["inferdoctor template list"]
     lines.extend([
         "",
-        "Next commands to try:",
+        t("template_validation.next_command", language),
         "  cd {0}".format(report.path),
     ])
     lines.extend("  {0}".format(command) for command in next_commands)

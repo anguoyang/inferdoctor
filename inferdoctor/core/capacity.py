@@ -8,6 +8,7 @@ from typing import List, Optional
 from inferdoctor.checkers.nvidia import NvidiaChecker
 from inferdoctor.core.config import Config
 from inferdoctor.core.models import Status
+from inferdoctor.i18n import t
 
 GPU_VRAM_PROFILES = {
     "rtx 4090": 24.0,
@@ -383,6 +384,7 @@ def render_capacity(
     model_size_b: Optional[object] = None,
     quant: str = "q4",
     runtime: Optional[str] = None,
+    language: str = "auto",
 ) -> str:
     hardware = detect_hardware(vram_gib=vram_gib, gpu_name=gpu_name)
     request = CapacityRequest(
@@ -399,12 +401,12 @@ def render_capacity(
         vram_label += " (GPU profile heuristic)"
 
     lines = [
-        "InferDoctor Capacity Preview",
+        t("capacity.title", language),
         "=" * 57,
         "Heuristic estimate only. No models are downloaded or run.",
         "InferDoctor does not rank model names or benchmark throughput.",
         "",
-        "Detected hardware:",
+        t("capacity.hardware_detected", language),
         "  CPU architecture: {0}".format(hardware.architecture),
         "  System RAM: {0} total, {1} available".format(
             _fmt_gib(hardware.total_ram_gib), _fmt_gib(hardware.available_ram_gib)
@@ -429,7 +431,7 @@ def render_capacity(
     lines.extend(
         [
             "",
-            "Workload readiness:",
+            t("capacity.workload_readiness", language),
             "Workload                          Readiness       Notes",
             "--------------------------------  --------------  ----------------------------------------",
         ]

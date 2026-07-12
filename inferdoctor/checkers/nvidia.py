@@ -27,6 +27,7 @@ class NvidiaChecker(Checker):
                     "Skip this check on CPU-only or non-NVIDIA systems.",
                 ],
                 raw_data={"nvidia_smi_path": None},
+                translation_key="nvidia.not_found",
             )
 
         command = [
@@ -43,6 +44,7 @@ class NvidiaChecker(Checker):
                 summary="nvidia-smi timed out",
                 suggestions=["Check whether the NVIDIA driver is responsive."],
                 raw_data={"nvidia_smi_path": executable},
+                translation_key="nvidia.timed_out",
             )
         except OSError as exc:
             return CheckResult(
@@ -52,6 +54,7 @@ class NvidiaChecker(Checker):
                 details=[str(exc)],
                 suggestions=["Repair the NVIDIA driver installation."],
                 raw_data={"nvidia_smi_path": executable},
+                translation_key="nvidia.exec_error",
             )
 
         if completed.returncode != 0:
@@ -68,6 +71,7 @@ class NvidiaChecker(Checker):
                     "nvidia_smi_path": executable,
                     "returncode": completed.returncode,
                 },
+                translation_key="nvidia.reported_error",
             )
 
         gpus: List[Dict[str, object]] = []
@@ -95,6 +99,7 @@ class NvidiaChecker(Checker):
                 details=[completed.stdout.strip() or "The command returned no output."],
                 suggestions=["Run nvidia-smi directly and inspect its output."],
                 raw_data={"nvidia_smi_path": executable},
+                translation_key="nvidia.no_gpu_data",
             )
 
         details = [
@@ -113,4 +118,6 @@ class NvidiaChecker(Checker):
             summary="{0} NVIDIA GPU(s) detected".format(len(gpus)),
             details=details,
             raw_data={"nvidia_smi_path": executable, "gpus": gpus},
+            translation_key="nvidia.detected",
+            translation_args={"count": len(gpus)},
         )

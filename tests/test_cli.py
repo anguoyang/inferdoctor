@@ -36,7 +36,7 @@ def test_default_command_renders_health_dashboard(results, capsys):
     assert exit_code == 0
     assert "InferDoctor - Local AI Stack Health Check" in output
     assert "Overall Health: 100 / 100" in output
-    results.assert_called_once_with(None, None, None, None)
+    results.assert_called_once_with(None, None, None, None, "auto")
 
 
 @patch("inferdoctor.cli._results_for_target", side_effect=_sample_run_for_language)
@@ -67,7 +67,7 @@ def test_default_command_does_not_force_language_override(results, capsys):
 
     assert exit_code == 0
     assert "InferDoctor - Local AI Stack Health Check" in capsys.readouterr().out
-    results.assert_called_once_with(None, None, None, None)
+    results.assert_called_once_with(None, None, None, None, "auto")
 
 
 @patch("inferdoctor.cli._results_for_target", return_value=_sample_run())
@@ -76,7 +76,7 @@ def test_check_command_renders_dashboard(results, capsys):
 
     assert exit_code == 0
     assert "System      PASS" in capsys.readouterr().out
-    results.assert_called_once_with("system", None, None, None)
+    results.assert_called_once_with("system", None, None, None, "auto")
 
 
 @patch("inferdoctor.cli._results_for_target", side_effect=_sample_run_for_language)
@@ -97,29 +97,6 @@ def test_report_command_rejects_language_option(capsys):
     assert "unrecognized arguments: --language zh" in capsys.readouterr().err
 
 
-def test_global_language_rejects_non_dashboard_command(capsys):
-    with pytest.raises(SystemExit) as exc:
-        main(["--language", "zh", "template", "list"])
-
-    assert exc.value.code == 2
-    assert "--language currently applies only" in capsys.readouterr().err
-
-
-def test_global_language_rejects_perf_command(capsys):
-    with pytest.raises(SystemExit) as exc:
-        main([
-            "--language",
-            "zh",
-            "perf",
-            "endpoint",
-            "--endpoint",
-            "http://127.0.0.1:8000/v1",
-        ])
-
-    assert exc.value.code == 2
-    assert "--language currently applies only" in capsys.readouterr().err
-
-
 @patch("inferdoctor.cli._results_for_target", return_value=_sample_run())
 def test_report_command_writes_json(results, tmp_path):
     output = tmp_path / "report.json"
@@ -128,7 +105,7 @@ def test_report_command_writes_json(results, tmp_path):
 
     assert exit_code == 0
     assert '"name": "system"' in output.read_text(encoding="utf-8")
-    results.assert_called_once_with(None, None, None, None)
+    results.assert_called_once_with(None, None, None, None, "auto")
 
 
 @patch("inferdoctor.cli._results_for_target", return_value=_sample_run())
@@ -140,7 +117,7 @@ def test_check_timeout_verbose_and_endpoint_options(results, capsys):
 
     assert exit_code == 0
     assert "Detailed diagnostics:" in capsys.readouterr().out
-    results.assert_called_once_with("sglang", None, 4.5, endpoint)
+    results.assert_called_once_with("sglang", None, 4.5, endpoint, "auto")
 
 
 def test_endpoint_requires_http_checker():
@@ -175,14 +152,26 @@ def test_invalid_config_language_is_rejected_by_cli(tmp_path):
     assert "language" in str(exc.value)
 
 
+def _nested_keys(d, prefix=""):
+    """Yield all dot-path keys from a nested dict."""
+    for k, v in d.items():
+        path = "{0}.{1}".format(prefix, k) if prefix else k
+        if isinstance(v, dict):
+            yield from _nested_keys(v, path)
+        else:
+            yield path
+
+
 def test_translation_dictionaries_have_identical_key_sets():
-    expected = set(TRANSLATIONS["en"])
-    assert set(TRANSLATIONS["zh"]) == expected
-    assert set(TRANSLATIONS["ja"]) == expected
+    en_keys = set(_nested_keys(TRANSLATIONS["en"]))
+    zh_keys = set(_nested_keys(TRANSLATIONS["zh"]))
+    ja_keys = set(_nested_keys(TRANSLATIONS["ja"]))
+    assert zh_keys == en_keys, "Missing in zh: {0}".format(en_keys - zh_keys)
+    assert ja_keys == en_keys, "Missing in ja: {0}".format(en_keys - ja_keys)
 
 
 def test_translation_falls_back_to_english_for_unknown_language():
-    assert t("dashboard_title", "fr") == "InferDoctor - Local AI Stack Health Check"
+    assert t("dashboard.title", "fr") == "InferDoctor - Local AI Stack Health Check"
 
 
 def test_endpoint_override_rejects_invalid_url():
@@ -214,7 +203,7 @@ def test_scenario_command_renders_readiness(results, capsys):
 
     assert exit_code == 0
     assert "InferDoctor Scenario Readiness" in capsys.readouterr().out
-    results.assert_called_once_with(None, None, None, None)
+    results.assert_called_once_with(None, None, None, None, "auto")
 
 
 @patch("inferdoctor.cli._results_for_target", return_value=_sample_run())
@@ -233,7 +222,7 @@ def test_profile_command_renders_markdown(results, capsys):
 
     assert exit_code == 0
     assert "InferDoctor Safe Diagnostic Profile" in capsys.readouterr().out
-    results.assert_called_once_with(None, None, None, None)
+    results.assert_called_once_with(None, None, None, None, "auto")
 
 
 @patch("inferdoctor.cli._results_for_target", return_value=_sample_run())
@@ -244,7 +233,7 @@ def test_profile_command_writes_json(results, tmp_path):
 
     assert exit_code == 0
     assert '"safe_to_share": true' in output.read_text(encoding="utf-8")
-    results.assert_called_once_with(None, None, None, None)
+    results.assert_called_once_with(None, None, None, None, "auto")
 
 
 @patch("inferdoctor.cli._results_for_target")
@@ -633,4 +622,4 @@ def test_perf_streaming_writes_markdown_report(smoke, tmp_path):
     ])
 
     assert exit_code == 0
-    assert "# InferDoctor Performance Smoke Test" in output.read_text(encoding="utf-8")
+    assert "# InferDoctor Performance UX Smoke Test" in output.read_text(encoding="utf-8")

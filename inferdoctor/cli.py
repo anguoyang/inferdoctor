@@ -1486,12 +1486,12 @@ def _results_for_target(
 
 
 
-def _render_perf_output(result, output_format: str) -> str:
+def _render_perf_output(result, output_format: str, language: str = "auto") -> str:
     if output_format == "json":
         return render_perf_json(result)
     if output_format == "markdown":
-        return render_perf_markdown(result)
-    return render_perf_result(result)
+        return render_perf_markdown(result, language=language)
+    return render_perf_result(result, language=language)
 
 
 def _emit_output(content: str, output: Optional[str]) -> None:
@@ -1513,14 +1513,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     args = parser.parse_args(arguments)
     if args.command is None:
         args = parser.parse_args(["check"] + arguments)
-    if getattr(args, "language", None) is not None and args.command != "check":
-        parser.error(
-            "--language currently applies only to the default health dashboard and inferdoctor check; "
-            "other commands may remain English in this first i18n release"
-        )
+
+    # Extract global language setting (None → "auto")
+    language = getattr(args, "language", None) or "auto"
 
     if args.command == "explain":
-        print(render_explanation(args.topic))
+        print(render_explanation(args.topic, language=language))
         return 0
     if args.command == "provider":
         try:
@@ -1609,7 +1607,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 docker=args.docker,
                 cold_start=args.cold_start,
                 cpu_fallback_suspected=args.cpu_fallback_suspected,
-            ), args.profile)))
+            ), language=language))
             return 0
         if args.optimize_command == "rag":
             print(render_optimization_report(apply_profile_to_optimization_report(advise_rag(
@@ -1628,7 +1626,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 streaming=args.streaming,
                 model_size=args.model_size,
                 vram_gib=args.vram,
-            ), args.profile)))
+            ), language=language))
             return 0
         if args.optimize_command == "plan":
             if (args.baseline and not args.candidate) or (args.candidate and not args.baseline):
@@ -1662,7 +1660,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 print("inferdoctor: {0}".format(render_endpoint_safety_error(safety)), file=sys.stderr)
                 return 2
             result = apply_profile_to_perf_result(run_endpoint_smoke(args.endpoint, args.model, args.timeout, runs=args.runs, warmup=args.warmup), args.profile)
-            _emit_output(_render_perf_output(result, args.format), args.output)
+            _emit_output(_render_perf_output(result, args.format, language=language), args.output)
             return 0
         if args.perf_command == "streaming":
             safety = classify_endpoint(args.endpoint)
@@ -1670,7 +1668,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 print("inferdoctor: {0}".format(render_endpoint_safety_error(safety)), file=sys.stderr)
                 return 2
             result = apply_profile_to_perf_result(run_streaming_smoke(args.endpoint, args.model, args.timeout, runs=args.runs, warmup=args.warmup), args.profile)
-            _emit_output(_render_perf_output(result, args.format), args.output)
+            _emit_output(_render_perf_output(result, args.format, language=language), args.output)
             return 0
         if args.perf_command == "compare":
             paths = list(args.paths or [])
@@ -2343,7 +2341,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     preference=args.preference,
                     hardware=args.hardware,
                     vram_gib=args.vram,
-                )
+                ),
+                language=language,
             )
         )
         return 0
@@ -2376,10 +2375,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         runtime = args.runtime
         interactive = sys.stdin.isatty() and goal is None and preference is None and runtime is None
         if interactive:
-            goal = input("What do you want to build? [chatbot/document-qa/customer-service/restaurant-ordering/local-api/not-sure]: ").strip() or None
-            preference = input("What do you prefer? [easiest/performance/cpu/gpu]: ").strip() or None
-            runtime = input("Existing runtime? [ollama/vllm/sglang/xinference/not-sure]: ").strip() or None
-        print(render_setup_plan(recommend_setup(goal, preference, runtime)))
+            goal = input(t("setup.what_to_build", language)).strip() or None
+            preference = input(t("setup.what_preference", language)).strip() or None
+            runtime = input(t("setup.existing_runtime", language)).strip() or None
+        print(render_setup_plan(recommend_setup(goal, preference, runtime), language=language))
         return 0
     if args.command == "model":
         if args.model_command == "fit":
@@ -2390,7 +2389,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                         quant=args.quant,
                         runtime=args.runtime,
                         vram_gib=args.vram,
-                    )
+                    ),
+                    language=language,
                 )
             )
             return 0
@@ -2402,6 +2402,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 model_size_b=args.model_size,
                 quant=args.quant,
                 runtime=args.runtime,
+                language=language,
             )
         )
         return 0
@@ -2414,7 +2415,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                         preference=args.preference,
                         hardware=args.hardware,
                         vram_gib=args.vram,
-                    )
+                    ),
+                    language=language,
                 )
             )
             return 0
@@ -2428,7 +2430,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                             hardware=args.hardware,
                             vram_gib=args.vram,
                             output_dir=args.output,
-                        )
+                        ),
+                        language=language,
                     )
                 )
                 return 0
@@ -2441,7 +2444,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                             hardware=args.hardware,
                             vram_gib=args.vram,
                             output_dir=args.output,
-                        )
+                        ),
+                        language=language,
                     )
                 )
                 return 0
@@ -2450,21 +2454,21 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if args.command == "template":
         try:
             if args.template_command == "list":
-                print(render_template_list())
+                print(render_template_list(language=language))
             elif args.template_command == "registry":
-                print(render_template_registry())
+                print(render_template_registry(language=language))
             elif args.template_command == "show":
-                print(render_template_detail(args.template))
+                print(render_template_detail(args.template, language=language))
             elif args.template_command == "create":
                 written = create_template_project(args.template, args.output)
-                print(render_template_create_summary(args.template, args.output, written))
+                print(render_template_create_summary(args.template, args.output, written, language=language))
             elif args.template_command == "validate":
-                print(render_template_validation(validate_template_project(args.path)))
+                print(render_template_validation(validate_template_project(args.path), language=language))
             elif args.template_command == "smoke-test":
-                print(render_template_smoke_test(smoke_test_template_project(args.path, timeout=args.timeout)))
+                print(render_template_smoke_test(smoke_test_template_project(args.path, timeout=args.timeout), language=language))
             elif args.template_command == "compose":
                 written = create_compose_project(args.template, args.output)
-                print(render_compose_create_summary(args.template, args.output, written))
+                print(render_compose_create_summary(args.template, args.output, written, language=language))
         except (KeyError, OSError) as exc:
             print("inferdoctor: {0}".format(exc), file=sys.stderr)
             return 2
@@ -2476,8 +2480,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             getattr(args, "config", None),
             getattr(args, "timeout", None),
             None,
+            language,
         )
-        print(render_scenarios(evaluate_scenarios(results, args.target)))
+        print(render_scenarios(evaluate_scenarios(results, args.target), language=language))
         return _exit_code(results)
 
     if args.command == "profile":
@@ -2486,11 +2491,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             getattr(args, "config", None),
             getattr(args, "timeout", None),
             None,
+            language,
         )
         rendered = (
             render_profile_json(results, config)
             if args.format == "json"
-            else render_profile_markdown(results, config)
+            else render_profile_markdown(results, config, language=language)
         )
         if args.output:
             try:
@@ -2509,22 +2515,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return _exit_code(results)
 
     if args.command == "check":
-        language = getattr(args, "language", None)
-        results, config = (
-            _results_for_target(
-                getattr(args, "target", None),
-                getattr(args, "config", None),
-                getattr(args, "timeout", None),
-                getattr(args, "endpoint", None),
-                language,
-            )
-            if language is not None
-            else _results_for_target(
-                getattr(args, "target", None),
-                getattr(args, "config", None),
-                getattr(args, "timeout", None),
-                getattr(args, "endpoint", None),
-            )
+        results, config = _results_for_target(
+            getattr(args, "target", None),
+            getattr(args, "config", None),
+            getattr(args, "timeout", None),
+            getattr(args, "endpoint", None),
+            language,
         )
         print(render_dashboard(results, config, verbose=args.verbose, language=config.language))
         return _exit_code(results)
@@ -2534,11 +2530,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         getattr(args, "config", None),
         getattr(args, "timeout", None),
         None,
+        language,
     )
     rendered = (
         render_json(results)
         if args.format == "json"
-        else render_markdown(results, verbose=args.verbose)
+        else render_markdown(results, verbose=args.verbose, language=language)
     )
     if args.output:
         try:

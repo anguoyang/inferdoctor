@@ -5,6 +5,7 @@ from typing import List, Optional
 
 from inferdoctor.core.capacity import detect_hardware
 from inferdoctor.core.setup import GOALS, PREFERENCES, recommend_setup
+from inferdoctor.i18n import t
 
 
 @dataclass(frozen=True)
@@ -145,24 +146,24 @@ def _fmt_number(value: float) -> str:
     return "{0:g}".format(value)
 
 
-def render_recommendation(recommendation: StackRecommendation) -> str:
+def render_recommendation(recommendation: StackRecommendation, language: str = "auto") -> str:
     vram = "unknown" if recommendation.vram_gib is None else "{0:g} GiB".format(recommendation.vram_gib)
     lines = [
-        "InferDoctor Stack Recommendation",
+        t("recommendation.title", language),
         "=" * 57,
-        "Goal: {0}".format(recommendation.goal),
-        "Preference: {0}".format(recommendation.preference),
+        t("recommendation.goal", language, goal=recommendation.goal),
+        t("recommendation.preference", language, preference=recommendation.preference),
         "Hardware: {0}".format(recommendation.hardware),
         "VRAM: {0}".format(vram),
         "Practical fit: {0}".format(recommendation.fit_label),
         "",
-        "Recommendation:",
+        t("recommendation.recommendation", language),
         "  Runtime: {0}".format(recommendation.runtime),
         "  Model size class: {0}".format(recommendation.model_size_class),
         "  Template: {0}".format(recommendation.template),
         "  Why: {0}".format(recommendation.why),
         "",
-        "Runtime paths:",
+        t("recommendation.runtime_path", language),
         "  Easiest: {0}".format(recommendation.easiest_path),
         "  Performance: {0}".format(recommendation.performance_path),
         "",
