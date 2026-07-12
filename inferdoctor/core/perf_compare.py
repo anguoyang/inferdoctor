@@ -126,6 +126,14 @@ def _compatibility(baseline: Dict[str, Any], candidate: Dict[str, Any]) -> Tuple
                 baseline.get("streaming_state"), candidate.get("streaming_state")
             )
         )
+    baseline_runs = (_number(baseline.get("successful_runs")) or 0.0) + (_number(baseline.get("failed_runs")) or 0.0)
+    candidate_runs = (_number(candidate.get("successful_runs")) or 0.0) + (_number(candidate.get("failed_runs")) or 0.0)
+    if baseline_runs != candidate_runs:
+        warnings.append("Run count differs: baseline={0:g}, candidate={1:g}.".format(baseline_runs, candidate_runs))
+    baseline_quality = baseline.get("metric_quality") if isinstance(baseline.get("metric_quality"), dict) else {}
+    candidate_quality = candidate.get("metric_quality") if isinstance(candidate.get("metric_quality"), dict) else {}
+    if baseline_quality != candidate_quality:
+        warnings.append("Metric quality differs: baseline={0!r}, candidate={1!r}.".format(baseline_quality, candidate_quality))
     return not warnings, warnings
 
 

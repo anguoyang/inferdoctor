@@ -116,3 +116,16 @@ def test_perf_compare_cli_requires_two_inputs(capsys):
 
     assert exit_code == 2
     assert "requires a baseline and candidate" in capsys.readouterr().err
+
+
+def test_compare_performance_warns_for_different_run_counts_and_metric_quality():
+    before = _report(success=1, failed=0)
+    after = _report(success=3, failed=0)
+    after["metric_quality"] = {"tokens": "exact", "tps": "exact"}
+
+    comparison = compare_performance(before, after)
+
+    assert comparison["compatible"] is False
+    assert comparison["verdict"] == "inconclusive"
+    assert any("Run count differs" in warning for warning in comparison["warnings"])
+    assert any("Metric quality differs" in warning for warning in comparison["warnings"])
