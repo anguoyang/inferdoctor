@@ -2,7 +2,22 @@
 
 ## Unreleased
 
-- No unreleased changes.
+### v0.7 Development
+
+- Added Dify application-level command group for preflight checks, kit export, offline validation, dry-run smoke tests, live app smoke tests, performance smoke reports, optimization guidance, and read-only knowledge retrieval checks.
+- Added the Local / Private RAG Starter Kit for Dify with manifest, starter DSL draft, preflight checks, smoke cases, sample document, performance guidance, and optimization notes.
+- Added Dify-specific SSE parsing for chat, chatflow, agent, workflow, node, completion, unknown, malformed, and error events.
+- Added Dify performance reports compatible with existing InferDoctor baseline and comparison workflows.
+- Added Dify documentation, security boundaries, Japanese quickstart, and a public reference example.
+
+### Safety
+
+- Dify integration uses published Dify APIs only.
+- InferDoctor does not install Dify, start containers, import DSLs automatically, create knowledge bases, upload documents, or store API keys.
+- Live Dify smoke tests require explicit endpoint and credential configuration.
+- LAN/private endpoints require explicit opt-in, and public endpoints require explicit public opt-in.
+- Dify performance checks are bounded smoke tests, not formal benchmarks.
+- Version remains 0.6.0 during v0.7 development.
 
 ## v0.6.0
 

@@ -192,3 +192,27 @@ def test_dify_cli_help_pages(capsys):
         main(["dify", "--help"])
     assert exc.value.code == 0
     assert "Dify" in capsys.readouterr().out
+
+
+def test_dify_closed_loop_golden_path(tmp_path):
+    kit = tmp_path / "kit"
+    export_dify_template("local-private-rag", kit)
+    validation = validate_dify_kit(kit)
+    smoke = run_dify_smoke(_config(), kit_path=str(kit), dry_run=True)
+    before = run_dify_perf(_config(), runs=1, client_factory=FakeChatClient)
+    after = dict(before)
+    after["metrics"] = dict(before["metrics"], ttft_seconds=0.35, total_latency_seconds=1.8)
+    after["metrics"]["aggregate"] = dict(before["metrics"]["aggregate"], ttft_median=0.35, total_latency_median=1.8)
+    after_path = tmp_path / "after.json"
+    after_path.write_text(json.dumps(after), encoding="utf-8")
+    before_baseline = baseline_from_report(before, name="before")
+    after_baseline = baseline_from_report(after, name="after")
+    comparison = compare_performance(before_baseline, after_baseline)
+    plan = optimize_dify(report_path=str(after_path), kit_path=str(kit), retrieval_ms=500)
+
+    assert validation["status"] == "WARN"
+    assert smoke["status"] == "PASS"
+    assert before["source_type"] == "dify"
+    assert comparison["verdict"] == "improvement"
+    assert plan["recommendations"]
+
