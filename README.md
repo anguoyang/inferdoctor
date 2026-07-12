@@ -118,7 +118,7 @@ inferdoctor optimize plan --report after.json
 
 ## Language Support
 
-InferDoctor v0.5 starts with first-step localization for the health dashboard and `inferdoctor check` console summary.
+InferDoctor includes first-step localization for the health dashboard and `inferdoctor check` console summary.
 
 ```bash
 inferdoctor --language zh
@@ -172,7 +172,7 @@ More screenshot-friendly samples:
 - [`examples/demo_health_dashboard.txt`](https://github.com/anguoyang/inferdoctor/blob/main/examples/demo_health_dashboard.txt)
 - [`examples/demo_scenarios.txt`](https://github.com/anguoyang/inferdoctor/blob/main/examples/demo_scenarios.txt)
 - [`examples/demo_profile.md`](https://github.com/anguoyang/inferdoctor/blob/main/examples/demo_profile.md)
-- [`examples/demo_outputs/`](https://github.com/anguoyang/inferdoctor/tree/main/examples/demo_outputs) - v0.4 health, capacity, recommendation, stack plan, bootstrap, validation, smoke-test, and model-fit demos
+- [`examples/demo_outputs/`](https://github.com/anguoyang/inferdoctor/tree/main/examples/demo_outputs) - health, capacity, recommendation, stack plan, bootstrap, validation, smoke-test, and model-fit demos
 
 Beginner setup docs and template examples:
 

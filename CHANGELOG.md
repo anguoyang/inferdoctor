@@ -4,6 +4,27 @@
 
 - No unreleased changes.
 
+## v0.6.0
+
+### Highlights
+
+- Added closed-loop local AI app optimization workflow: diagnose, plan, build, validate, measure, compare, optimize, and verify improvement.
+- Added reusable sanitized performance baselines with create, show, list, and delete commands.
+- Added before-and-after performance comparison for TTFT, total latency, generation duration, TPS, success rate, streaming state, and readiness category.
+- Added evidence-based optimization plans with observations, evidence level, verification commands, expected impact category, and limitations.
+- Added application experience profiles for interactive chat, customer service, restaurant ordering, document Q&A, RAG, local APIs, batch processing, and internal prototypes.
+- Improved guided quickstart output with validation, baseline, comparison, and optimization-plan commands.
+- Added safer local, LAN, and private endpoint workflow guidance with explicit non-local opt-in.
+- Added performance verification guidance to principal starter templates.
+- Added customer-service and local document Q&A reference apps.
+
+### Safety
+
+- Performance commands remain bounded smoke tests, not formal benchmarks.
+- No model downloads, runtime installation, service startup, system modification, concurrency benchmark, or sustained load test was added.
+- Public endpoints are not contacted automatically.
+- Dify integration is not included in v0.6.
+
 ## v0.5.1
 
 ### Documentation Hotfix
