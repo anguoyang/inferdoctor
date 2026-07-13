@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 import pytest
 
@@ -88,7 +89,10 @@ def test_dify_template_export_and_validate(tmp_path):
     assert result["status"] == "WARN"
     assert result["readiness_score"] > 80
     assert (output / "dify_app.yaml").exists()
-    assert "MODEL_NAME_PLACEHOLDER" in (output / "dify_app.yaml").read_text(encoding="utf-8")
+    dsl = (output / "dify_app.yaml").read_text(encoding="utf-8")
+    assert "MODEL_NAME_PLACEHOLDER" not in dsl
+    assert "provider: ''" in dsl
+    assert "dataset_ids: []" in dsl
 
 
 def test_sse_parser_handles_dify_chat_and_workflow_events():
@@ -215,4 +219,85 @@ def test_dify_closed_loop_golden_path(tmp_path):
     assert before["source_type"] == "dify"
     assert comparison["verdict"] == "improvement"
     assert plan["recommendations"]
+
+
+def test_dify_validate_standalone_dsl_does_not_scan_siblings(tmp_path):
+    target = tmp_path / "target.yml"
+    sibling = tmp_path / "sibling-secret.txt"
+    venv_file = tmp_path / "sibling-venv" / "lib" / "python3.12" / "site-packages" / "fake.py"
+    binary = tmp_path / "sibling-binary.bin"
+    target.write_text("app:\n  mode: advanced-chat\nworkflow:\n  graph:\n    nodes: []\n    edges: []\n", encoding="utf-8")
+    sibling.write_text("DIFY_APP_API_KEY=sk-should-not-be-scanned-1234567890\n", encoding="utf-8")
+    venv_file.parent.mkdir(parents=True)
+    venv_file.write_text("API_TOKEN=sk-venv-should-not-be-scanned-1234567890\n", encoding="utf-8")
+    binary.write_bytes(b"\x00\x01token=sk-binary-should-not-be-scanned-1234567890")
+
+    result = validate_dify_kit(target)
+    rendered = json.dumps(result)
+
+    assert "sibling-secret" not in rendered
+    assert "sibling-venv" not in rendered
+    assert "sibling-binary" not in rendered
+
+
+def test_dify_validate_detects_secret_in_target_dsl(tmp_path):
+    target = tmp_path / "target.yml"
+    target.write_text("app:\n  mode: advanced-chat\nx: DIFY_APP_API_KEY=sk-target-secret-1234567890\n", encoding="utf-8")
+
+    result = validate_dify_kit(target)
+
+    assert any("secret scan" == check["item"] for check in result["checks"])
+    assert any("target.yml" in check["detail"] for check in result["checks"])
+
+
+def test_dify_validate_kit_skips_external_symlink_and_binary(tmp_path):
+    kit = tmp_path / "kit"
+    export_dify_template("local-private-rag", kit)
+    outside = tmp_path / "outside-secret.txt"
+    outside.write_text("DIFY_APP_API_KEY=sk-outside-secret-1234567890\n", encoding="utf-8")
+    (kit / "sample_docs" / "outside-link.txt").symlink_to(outside)
+    (kit / "sample_docs" / "binary.bin").write_bytes(b"\x00\x01DIFY_APP_API_KEY=sk-binary-secret-1234567890")
+
+    result = validate_dify_kit(kit)
+    rendered = json.dumps(result)
+
+    assert "outside-secret" not in rendered
+    assert "binary.bin" not in rendered
+    assert result["validation_level"] == "current_dify_structural_compatibility_validated"
+
+
+def test_dify_validate_rejects_path_traversal_manifest(tmp_path):
+    kit = tmp_path / "kit"
+    export_dify_template("local-private-rag", kit)
+    manifest = kit / "manifest.yaml"
+    manifest.write_text(manifest.read_text(encoding="utf-8") + "\nextra_file: ../secret.txt\n", encoding="utf-8")
+
+    result = validate_dify_kit(manifest)
+
+    assert result["status"] == "FAIL"
+    assert any(check["item"] == "manifest paths" for check in result["checks"])
+
+
+def test_old_conceptual_dsl_fails_current_structural_validation(tmp_path):
+    old = tmp_path / "old.yml"
+    old.write_text(
+        "app:\n  mode: advanced-chat\nworkflow:\n  graph:\n    nodes:\n"
+        "    - id: start\n      type: start\n    edges: []\n",
+        encoding="utf-8",
+    )
+
+    result = validate_dify_kit(old)
+
+    assert result["status"] == "FAIL"
+    assert result["validation_level"] == "yaml_parsed"
+    assert any(check["item"] == "top-level kind" and check["status"] == "FAIL" for check in result["checks"])
+
+
+def test_sanitized_current_dify_fixture_validates():
+    fixture = Path("tests/fixtures/dify/current_cloud_chatflow_structure.yml")
+    result = validate_dify_kit(fixture)
+
+    assert result["status"] == "WARN"
+    assert result["validation_level"] == "current_dify_structural_compatibility_validated"
+    assert any("Knowledge dataset is unresolved" in item for item in result["warnings"])
 

@@ -435,40 +435,206 @@ compatibility_notes:
   - Manual Dify import must be verified in the target workspace.
 """,
         "dify_app.yaml": """app:
+  description: Starter Dify RAG app for local or private model endpoints.
+  icon: 🩺
+  icon_background: '#E1F5FE'
+  icon_type: emoji
   mode: advanced-chat
-  name: Local Private RAG Starter
-  description: A small RAG flow for local or private model endpoints.
+  name: InferDoctor Local Private RAG
+  use_icon_as_answer_icon: false
+dependencies: []
+kind: app
+version: 0.6.0
 workflow:
+  conversation_variables: []
+  environment_variables: []
+  features:
+    file_upload:
+      allowed_file_extensions: []
+      allowed_file_types: []
+      allowed_file_upload_methods: []
+      enabled: false
+      image:
+        enabled: false
+        number_limits: 3
+        transfer_methods: []
+      number_limits: 3
+    opening_statement: ''
+    retriever_resource:
+      enabled: true
+    sensitive_word_avoidance:
+      enabled: false
+    speech_to_text:
+      enabled: false
+    suggested_questions: []
+    suggested_questions_after_answer:
+      enabled: false
+    text_to_speech:
+      enabled: false
+      language: ''
+      voice: ''
   graph:
-    nodes:
-      - id: start
-        type: start
-        title: User question
-      - id: retrieve_knowledge
-        type: knowledge-retrieval
-        title: Retrieve from selected knowledge base
-        dataset_id: KNOWLEDGE_DATASET_ID_PLACEHOLDER
-        top_k: 4
-      - id: llm_answer
-        type: llm
-        title: Generate grounded answer
-        provider: MODEL_PROVIDER_PLACEHOLDER
-        model: MODEL_NAME_PLACEHOLDER
-        streaming: true
-        context_budget_tokens: 2500
-      - id: answer
-        type: answer
-        title: Stream final answer
     edges:
-      - source: start
-        target: retrieve_knowledge
-      - source: retrieve_knowledge
-        target: llm_answer
-      - source: llm_answer
-        target: answer
-notes:
-  import_status: manual_import_required
-  live_import_verified: false
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: start
+        targetType: knowledge-retrieval
+      id: start_node-source-knowledge_retrieval-target
+      source: start_node
+      sourceHandle: source
+      target: knowledge_retrieval
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: knowledge-retrieval
+        targetType: llm
+      id: knowledge_retrieval-source-llm_answer-target
+      source: knowledge_retrieval
+      sourceHandle: source
+      target: llm_answer
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: llm
+        targetType: answer
+      id: llm_answer-source-answer_node-target
+      source: llm_answer
+      sourceHandle: source
+      target: answer_node
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    nodes:
+    - data:
+        desc: ''
+        selected: false
+        title: Start
+        type: start
+        variables: []
+      height: 54
+      id: start_node
+      position:
+        x: 80
+        y: 240
+      positionAbsolute:
+        x: 80
+        y: 240
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+      zIndex: 0
+    - data:
+        dataset_ids: []
+        desc: Select a Dify knowledge base after manual import.
+        multiple_retrieval_config:
+          reranking_enable: false
+          reranking_model:
+            model: ''
+            provider: ''
+          top_k: 4
+        query_variable_selector:
+        - sys
+        - query
+        retrieval_mode: single
+        selected: false
+        title: Retrieve knowledge
+        type: knowledge-retrieval
+      height: 120
+      id: knowledge_retrieval
+      position:
+        x: 380
+        y: 220
+      positionAbsolute:
+        x: 380
+        y: 220
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+      zIndex: 0
+    - data:
+        context:
+          enabled: true
+          variable_selector:
+          - knowledge_retrieval
+          - result
+        desc: Configure the model provider and model name in Dify after import.
+        memory:
+          query_prompt_template: '{{#sys.query#}}'
+          role_prefix:
+            assistant: ''
+            user: ''
+          window:
+            enabled: false
+        model:
+          completion_params:
+            temperature: 0.2
+            top_p: 0.9
+          mode: chat
+          name: ''
+          provider: ''
+        prompt_template:
+        - id: system-prompt
+          role: system
+          text: Use the retrieved context when it is relevant. If the answer is not in the context, say that you do not know.
+        - id: user-prompt
+          role: user
+          text: '{{#sys.query#}}'
+        selected: false
+        title: Generate answer
+        type: llm
+        variables: []
+        vision:
+          enabled: false
+      height: 156
+      id: llm_answer
+      position:
+        x: 680
+        y: 200
+      positionAbsolute:
+        x: 680
+        y: 200
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+      zIndex: 0
+    - data:
+        answer: '{{#llm_answer.text#}}'
+        desc: ''
+        selected: false
+        title: Answer
+        type: answer
+        variables: []
+      height: 104
+      id: answer_node
+      position:
+        x: 980
+        y: 230
+      positionAbsolute:
+        x: 980
+        y: 230
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+      zIndex: 0
+    viewport:
+      x: 0
+      y: 0
+      zoom: 0.8
 """,
         "README.md": """# Local / Private RAG Starter Kit for Dify
 
@@ -654,21 +820,145 @@ def _read_text(path: Path) -> str:
     return path.read_text(encoding="utf-8", errors="replace")
 
 
-def _scan_for_secrets(root: Path) -> List[str]:
+
+SKIP_SECRET_DIRS = {".git", ".venv", "venv", "site-packages", "__pycache__", "build", "dist", "node_modules"}
+SKIP_SECRET_SUFFIXES = {".pyc", ".so", ".whl", ".zip", ".tar", ".gz", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bin"}
+MAX_SECRET_FILE_BYTES = 128 * 1024
+MAX_SECRET_FILES = 200
+MAX_SECRET_FINDINGS = 20
+
+
+def _is_binary_file(path: Path) -> bool:
+    try:
+        chunk = path.read_bytes()[:2048]
+    except OSError:
+        return True
+    return b"\0" in chunk
+
+
+def _should_scan_file(path: Path, root: Path) -> bool:
+    if path.is_symlink() or not path.is_file():
+        return False
+    parts = set(path.relative_to(root).parts) if root in path.parents or path == root else set(path.parts)
+    if parts & SKIP_SECRET_DIRS:
+        return False
+    if path.suffix.lower() in SKIP_SECRET_SUFFIXES:
+        return False
+    try:
+        if path.stat().st_size > MAX_SECRET_FILE_BYTES:
+            return False
+    except OSError:
+        return False
+    return not _is_binary_file(path)
+
+
+def _secret_scan_candidates(root: Path, target: Path) -> List[Path]:
+    if target.is_file():
+        return [target] if _should_scan_file(target, target.parent) else []
+    candidates: List[Path] = []
+    for child in target.rglob("*"):
+        if len(candidates) >= MAX_SECRET_FILES:
+            break
+        if _should_scan_file(child, target):
+            candidates.append(child)
+    return candidates
+
+
+def _scan_for_secrets(root: Path, target: Optional[Path] = None) -> List[str]:
+    scan_target = target or root
     findings: List[str] = []
     patterns = [
-        re.compile(r"Authorization:\s*Bearer\s+[^\s]+", re.IGNORECASE),
-        re.compile(r"\bsk-[A-Za-z0-9]{12,}\b"),
-        re.compile(r"(api[_-]?key|token|secret|password)\s*[:=]\s*(?!replace|your|REDACTED|\$|<)[A-Za-z0-9._~+/=-]{8,}", re.IGNORECASE),
+        re.compile(r"Authorization:\s*Bearer\s+[A-Za-z0-9._~+/=-]{12,}", re.IGNORECASE),
+        re.compile(r"\bsk-[A-Za-z0-9][A-Za-z0-9._-]{12,}\b"),
+        re.compile(r"\b[A-Z0-9_]*(?:API|ACCESS|SECRET|AUTH|BEARER|TOKEN|KEY)[A-Z0-9_]*\s*[:=]\s*(?!replace|your|REDACTED|\$|<)[A-Za-z0-9._~+/=-]{16,}\b", re.IGNORECASE),
         re.compile(r"https?://[^\s/@]+:[^\s/@]+@"),
     ]
-    paths = list(root.rglob("*")) if root.is_dir() else [root]
-    for path in paths:
-        if path.is_file():
-            text = _read_text(path)
-            if any(pattern.search(text) for pattern in patterns):
-                findings.append("possible secret-like value in {0}".format(path.relative_to(root) if root.is_dir() else path.name))
+    for path in _secret_scan_candidates(root, scan_target):
+        if len(findings) >= MAX_SECRET_FINDINGS:
+            findings.append("secret scan output capped after {0} findings".format(MAX_SECRET_FINDINGS))
+            break
+        text = _read_text(path)
+        if any(pattern.search(text) for pattern in patterns):
+            base = scan_target if scan_target.is_dir() else scan_target.parent
+            try:
+                shown = path.relative_to(base)
+            except ValueError:
+                shown = path.name
+            findings.append("possible secret-like value in {0}".format(shown))
     return findings
+
+
+def _manifest_is_inferdoctor_kit(path: Path) -> bool:
+    return path.name == "manifest.yaml" and path.exists() and DIFY_KIT_SCHEMA_VERSION in _read_text(path)
+
+
+def _validation_scope(target: Path) -> tuple[Path, Path, Path, bool]:
+    if target.is_dir():
+        return target, target / "dify_app.yaml", target, True
+    if _manifest_is_inferdoctor_kit(target):
+        return target.parent, target.parent / "dify_app.yaml", target.parent, True
+    return target.parent, target, target, False
+
+
+def _has(pattern: str, text: str) -> bool:
+    return re.search(pattern, text, flags=re.MULTILINE) is not None
+
+
+def _extract_node_ids(dsl: str) -> List[str]:
+    return re.findall(r"^\s*id:\s*([A-Za-z0-9_.-]+)\s*$", dsl, flags=re.MULTILINE)
+
+
+def _structural_checks(dsl: str) -> tuple[List[Dict[str, Any]], List[str]]:
+    checks: List[Dict[str, Any]] = []
+    warnings: List[str] = []
+
+    def add(status: str, item: str, detail: str) -> None:
+        checks.append({"status": status, "item": item, "detail": detail})
+
+    required_patterns = [
+        ("top-level app", r"^app:\s*$"),
+        ("top-level dependencies", r"^dependencies:\s*\[\]\s*$|^dependencies:\s*$"),
+        ("top-level kind", r"^kind:\s*app\s*$"),
+        ("top-level version", r"^version:\s*[0-9]"),
+        ("workflow", r"^workflow:\s*$"),
+        ("workflow conversation_variables", r"^\s{2}conversation_variables:"),
+        ("workflow environment_variables", r"^\s{2}environment_variables:"),
+        ("workflow features", r"^\s{2}features:\s*$"),
+        ("workflow graph", r"^\s{2}graph:\s*$"),
+        ("graph edges", r"^\s{4}edges:\s*$"),
+        ("graph nodes", r"^\s{4}nodes:\s*$"),
+        ("graph viewport", r"^\s{4}viewport:\s*$"),
+        ("node data", r"^\s{4}- data:\s*$"),
+        ("node wrapper type", r"^\s{6}type:\s*custom\s*$"),
+        ("node position", r"^\s{6}position:\s*$"),
+        ("node positionAbsolute", r"^\s{6}positionAbsolute:\s*$"),
+        ("node dimensions", r"^\s{6}height:\s*[0-9]+"),
+        ("node width", r"^\s{6}width:\s*[0-9]+"),
+        ("edge id", r"^\s{6}id:\s*[-A-Za-z0-9_.]+"),
+        ("edge sourceHandle", r"^\s{6}sourceHandle:\s*source\s*$"),
+        ("edge targetHandle", r"^\s{6}targetHandle:\s*target\s*$"),
+        ("edge sourceType", r"^\s{8}sourceType:\s*"),
+        ("edge targetType", r"^\s{8}targetType:\s*"),
+        ("LLM completion params", r"^\s{10}completion_params:\s*$"),
+        ("LLM prompt template", r"^\s{8}prompt_template:\s*$"),
+        ("LLM context", r"^\s{8}context:\s*$"),
+        ("LLM memory", r"^\s{8}memory:\s*$"),
+        ("LLM vision", r"^\s{8}vision:\s*$"),
+        ("answer expression", r"answer:\s*'?\{\{#[-A-Za-z0-9_.]+\.text#\}\}'?"),
+    ]
+    for item, pattern in required_patterns:
+        add("PASS" if _has(pattern, dsl) else "FAIL", item, "current Dify structural field")
+    for node_type in ("start", "knowledge-retrieval", "llm", "answer"):
+        add("PASS" if _has(r"^\s{{8}}type:\s*{0}\s*$".format(re.escape(node_type)), dsl) else "FAIL", "node:{0}".format(node_type), "node.data type should be present")
+    node_ids = _extract_node_ids(dsl)
+    add("PASS" if node_ids and len(node_ids) == len(set(node_ids)) else "FAIL", "node ids", "node ids should be unique")
+    unresolved_edges = [item for item in re.findall(r"^\s{6}(?:source|target):\s*([A-Za-z0-9_.-]+)\s*$", dsl, flags=re.MULTILINE) if item not in node_ids]
+    add("PASS" if not unresolved_edges else "FAIL", "edge references", "all edges reference known nodes" if not unresolved_edges else "unknown nodes: {0}".format(", ".join(sorted(set(unresolved_edges)))))
+    if _has(r"dataset_ids:\s*\[\]\s*$", dsl):
+        warnings.append("Knowledge dataset is unresolved; select a Dify knowledge base after import.")
+    if _has(r"provider:\s*''\s*$", dsl) or _has(r"name:\s*''\s*$", dsl):
+        warnings.append("LLM provider/model is unresolved; configure it in Dify after import.")
+    return checks, warnings
 
 
 def validate_dify_kit(path: str | Path) -> Dict[str, Any]:
@@ -680,37 +970,40 @@ def validate_dify_kit(path: str | Path) -> Dict[str, Any]:
 
     if not target.exists():
         add("FAIL", "path", "Path does not exist")
-        return _validation_result(target, checks)
-    root = target if target.is_dir() else target.parent
-    dsl_path = target if target.is_file() else root / "dify_app.yaml"
-    if target.is_dir():
+        return _validation_result(target, checks, validation_level="yaml_parsed")
+
+    root, dsl_path, scan_target, is_kit = _validation_scope(target)
+    if is_kit:
         for name in ("manifest.yaml", "dify_app.yaml", "README.md", ".env.example", "smoke_cases.yaml"):
-            add("PASS" if (root / name).exists() else "FAIL", "file:{0}".format(name), "required file")
+            candidate = root / name
+            add("PASS" if candidate.exists() and candidate.resolve().is_relative_to(root.resolve()) else "FAIL", "file:{0}".format(name), "required kit file")
+        manifest = _read_text(root / "manifest.yaml") if (root / "manifest.yaml").exists() else ""
+        if manifest:
+            add("PASS" if DIFY_KIT_SCHEMA_VERSION in manifest else "FAIL", "manifest schema", "expected {0}".format(DIFY_KIT_SCHEMA_VERSION))
+            if ".." in manifest:
+                add("FAIL", "manifest paths", "manifest must not reference parent-directory paths")
     else:
-        add("WARN", "kit-structure", "Validating a single DSL file; kit-level files were not checked")
-    manifest = _read_text(root / "manifest.yaml") if (root / "manifest.yaml").exists() else ""
-    if manifest:
-        add("PASS" if DIFY_KIT_SCHEMA_VERSION in manifest else "FAIL", "manifest schema", "expected {0}".format(DIFY_KIT_SCHEMA_VERSION))
-        add("PASS" if "local-private-rag" in manifest else "WARN", "manifest name", "canonical kit name should be local-private-rag")
+        add("WARN", "kit-structure", "Validating a standalone DSL file only; sibling files are not inspected")
+
     if not dsl_path.exists():
         add("FAIL", "DSL", "dify_app.yaml was not found")
-        return _validation_result(root, checks)
+        return _validation_result(root, checks, validation_level="package_structure_validated")
+
     dsl = _read_text(dsl_path)
-    add("PASS" if "mode:" in dsl else "FAIL", "DSL app mode", "app mode should be present")
-    node_ids = re.findall(r"^\s*-\s*id:\s*([A-Za-z0-9_.-]+)", dsl, flags=re.MULTILINE)
-    add("PASS" if node_ids and len(node_ids) == len(set(node_ids)) else "FAIL", "node ids", "node ids should be unique")
-    for required_type in ("start", "knowledge-retrieval", "llm", "answer"):
-        add("PASS" if re.search(r"type:\s*{0}\b".format(re.escape(required_type)), dsl) else "FAIL", "node:{0}".format(required_type), "required node type")
-    unresolved_edges = [item for item in re.findall(r"(?:source|target):\s*([A-Za-z0-9_.-]+)", dsl) if item not in node_ids]
-    add("PASS" if not unresolved_edges else "FAIL", "edge references", "all edges reference known nodes" if not unresolved_edges else "unknown nodes: {0}".format(", ".join(sorted(set(unresolved_edges)))))
-    for placeholder in ("MODEL_PROVIDER_PLACEHOLDER", "MODEL_NAME_PLACEHOLDER", "KNOWLEDGE_DATASET_ID_PLACEHOLDER"):
-        add("WARN" if placeholder in dsl else "PASS", "placeholder:{0}".format(placeholder), "replace before live import" if placeholder in dsl else "resolved")
-    for finding in _scan_for_secrets(root):
+    structural, unresolved = _structural_checks(dsl)
+    checks.extend(structural)
+    for warning in unresolved:
+        add("WARN", "unresolved configuration", warning)
+    for finding in _scan_for_secrets(root, scan_target):
         add("FAIL", "secret scan", finding)
-    return _validation_result(root, checks)
+
+    level = "current_dify_structural_compatibility_validated"
+    if any(check["status"] == "FAIL" for check in structural):
+        level = "package_structure_validated" if is_kit else "yaml_parsed"
+    return _validation_result(root if is_kit else dsl_path, checks, validation_level=level)
 
 
-def _validation_result(path: Path, checks: List[Dict[str, Any]]) -> Dict[str, Any]:
+def _validation_result(path: Path, checks: List[Dict[str, Any]], *, validation_level: str = "package_structure_validated") -> Dict[str, Any]:
     failed = sum(1 for check in checks if check["status"] == "FAIL")
     warned = sum(1 for check in checks if check["status"] == "WARN")
     passed = sum(1 for check in checks if check["status"] == "PASS")
@@ -722,7 +1015,7 @@ def _validation_result(path: Path, checks: List[Dict[str, Any]]) -> Dict[str, An
         "path": str(path),
         "status": "FAIL" if failed else ("WARN" if warned else "PASS"),
         "readiness_score": score,
-        "validation_level": "static_compatibility_validated" if not failed else "package_structure_checked",
+        "validation_level": validation_level if not failed else validation_level,
         "checks": checks,
         "top_fixes": _top_fixes(checks),
         "warnings": [check["detail"] for check in checks if check["status"] == "WARN"],

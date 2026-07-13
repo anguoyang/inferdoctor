@@ -1035,8 +1035,6 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 if args.baseline_command == "show":
                     baseline = load_report_or_baseline(args.baseline)
                     if args.format == "json":
-                        import json
-
                         rendered = json.dumps(baseline, indent=2, sort_keys=True)
                     elif args.format == "markdown":
                         rendered = render_baseline_markdown(baseline, args.baseline)
