@@ -30,6 +30,14 @@ from inferdoctor.core.dify import (
     run_dify_smoke,
     validate_dify_kit,
 )
+from inferdoctor.core.dify_reliability import (
+    render_reliability_report,
+    run_dify_connectivity_check,
+    run_dify_evidence_collect,
+    run_dify_evidence_explain,
+    run_dify_selfhost_inspect,
+    run_dify_selfhost_preflight,
+)
 from inferdoctor.core.config import (
     Config,
     ConfigError,
@@ -508,6 +516,51 @@ def _parser() -> argparse.ArgumentParser:
     dify_knowledge_check.add_argument("--allow-public", action="store_true")
     dify_knowledge_check.add_argument("--format", choices=("console", "json", "markdown"), default="console")
     dify_knowledge_check.add_argument("--output", help="Write output to this file")
+
+    def add_dify_compose_options(command):
+        command.add_argument("--compose-file", help="Dify Docker Compose file to inspect read-only")
+        command.add_argument("--project-directory", help="Directory containing compose.yaml or docker-compose.yaml")
+        command.add_argument("--project-name", help="Optional Compose project name used for report context")
+        command.add_argument("--format", choices=("console", "json", "markdown"), default="console")
+        command.add_argument("--output", help="Write output to this file")
+
+    dify_selfhost = dify_subparsers.add_parser("selfhost", help="Read-only self-hosted Dify deployment diagnostics")
+    dify_selfhost_subparsers = dify_selfhost.add_subparsers(dest="dify_selfhost_command", required=True)
+    dify_selfhost_preflight = dify_selfhost_subparsers.add_parser("preflight", help="Check host, Docker, Compose, and service readiness without starting anything")
+    add_dify_compose_options(dify_selfhost_preflight)
+    dify_selfhost_inspect = dify_selfhost_subparsers.add_parser("inspect", help="Inspect an existing selected Dify Compose deployment read-only")
+    add_dify_compose_options(dify_selfhost_inspect)
+    dify_selfhost_inspect.add_argument("--since", default="10m", help="Bounded log window for --details, for example 10m")
+    dify_selfhost_inspect.add_argument("--services", help="Comma-separated service names or roles to inspect")
+    dify_selfhost_inspect.add_argument("--details", action="store_true", help="Collect bounded redacted log signatures for failed or selected services")
+
+    dify_connectivity = dify_subparsers.add_parser("connectivity", help="Diagnose model endpoint connectivity across host, containers, and Dify layers")
+    dify_connectivity_subparsers = dify_connectivity.add_subparsers(dest="dify_connectivity_command", required=True)
+    dify_connectivity_check = dify_connectivity_subparsers.add_parser("check", help="Run layered model connectivity diagnosis")
+    add_dify_compose_options(dify_connectivity_check)
+    dify_connectivity_check.add_argument("--endpoint", help="Model endpoint URL to test, for example http://192.168.1.20:8000/v1")
+    dify_connectivity_check.add_argument("--runtime", choices=("auto", "openai-compatible", "ollama", "vllm", "sglang", "xinference"), default="auto")
+    dify_connectivity_check.add_argument("--role", choices=("chat", "embedding", "rerank", "tool"), default="chat")
+    dify_connectivity_check.add_argument("--services", help="Comma-separated service names or roles for container probes")
+    dify_connectivity_check.add_argument("--path", help="Optional endpoint route to probe instead of /models")
+    dify_connectivity_check.add_argument("--through-dify", action="store_true", help="Include Dify-mediated provider path evidence when app API options are supplied")
+    dify_connectivity_check.add_argument("--app-api-base", help="Published Dify app API base for Dify-mediated checks")
+    dify_connectivity_check.add_argument("--app-key-env", default="DIFY_APP_API_KEY", help="Environment variable containing the Dify app API key")
+    dify_connectivity_check.add_argument("--allow-non-local", action="store_true", help="Allow a bounded probe to a LAN/private endpoint you control")
+    dify_connectivity_check.add_argument("--allow-public", action="store_true", help="Allow a bounded probe to an explicitly supplied public endpoint")
+    dify_connectivity_check.add_argument("--details", action="store_true", help="Attempt bounded read-only probes from detected containers")
+
+    dify_evidence = dify_subparsers.add_parser("evidence", help="Collect and explain bounded redacted Dify evidence bundles")
+    dify_evidence_subparsers = dify_evidence.add_subparsers(dest="dify_evidence_command", required=True)
+    dify_evidence_collect = dify_evidence_subparsers.add_parser("collect", help="Collect a bounded redacted self-host evidence bundle")
+    add_dify_compose_options(dify_evidence_collect)
+    dify_evidence_collect.add_argument("--since", default="10m")
+    dify_evidence_collect.add_argument("--services", help="Comma-separated service names or roles")
+    dify_evidence_collect.add_argument("--details", action="store_true", help="Collect bounded redacted log signatures")
+    dify_evidence_explain = dify_evidence_subparsers.add_parser("explain", help="Explain a saved Dify evidence bundle")
+    dify_evidence_explain.add_argument("bundle", help="Evidence bundle JSON path")
+    dify_evidence_explain.add_argument("--format", choices=("console", "json", "markdown"), default="console")
+    dify_evidence_explain.add_argument("--output", help="Write output to this file")
 
     report = subparsers.add_parser(
         "report",
@@ -1098,6 +1151,31 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 result = run_dify_knowledge_check(config, query=args.query, show_content=args.show_content)
                 _emit_output(render_dify_knowledge(result, args.format), args.output)
                 return 1 if result.get("status") == "FAIL" else 0
+            if args.dify_command == "selfhost":
+                if args.dify_selfhost_command == "preflight":
+                    result = run_dify_selfhost_preflight(compose_file=args.compose_file, project_directory=args.project_directory, project_name=args.project_name)
+                    _emit_output(render_reliability_report(result, args.format), args.output)
+                    return 1 if result.get("status") == "BLOCKED" else 0
+                if args.dify_selfhost_command == "inspect":
+                    services = args.services.split(",") if args.services else None
+                    result = run_dify_selfhost_inspect(compose_file=args.compose_file, project_directory=args.project_directory, project_name=args.project_name, since=args.since, services=services, details=args.details)
+                    _emit_output(render_reliability_report(result, args.format), args.output)
+                    return 1 if result.get("status") == "BLOCKED" else 0
+            if args.dify_command == "connectivity" and args.dify_connectivity_command == "check":
+                services = args.services.split(",") if args.services else None
+                result = run_dify_connectivity_check(endpoint=args.endpoint, runtime=args.runtime, role=args.role, compose_file=args.compose_file, project_directory=args.project_directory, project_name=args.project_name, services=services, path=args.path, through_dify=args.through_dify, app_api_base=args.app_api_base, app_key_env=args.app_key_env, allow_non_local=args.allow_non_local, allow_public=args.allow_public, details=args.details)
+                _emit_output(render_reliability_report(result, args.format), args.output)
+                return 1 if result.get("status") == "FAIL" else 0
+            if args.dify_command == "evidence":
+                if args.dify_evidence_command == "collect":
+                    services = args.services.split(",") if args.services else None
+                    result = run_dify_evidence_collect(compose_file=args.compose_file, project_directory=args.project_directory, project_name=args.project_name, since=args.since, services=services, details=args.details)
+                    _emit_output(render_reliability_report(result, args.format), args.output)
+                    return 0
+                if args.dify_evidence_command == "explain":
+                    result = run_dify_evidence_explain(args.bundle)
+                    _emit_output(render_reliability_report(result, args.format), args.output)
+                    return 0
         except (DifyError, KeyError, OSError, json.JSONDecodeError) as exc:
             print("inferdoctor: {0}".format(exc), file=sys.stderr)
             return 2
