@@ -134,7 +134,7 @@ def test_compare_improved_and_incompatible():
 
 
 def test_gold_context_probe_dry_run():
-    result = run_gold_context_probe(case(), context_text="Returns are allowed for 30 days.", endpoint="http://127.0.0.1:11535/v1", model="fixture", dry_run=True)
+    result = run_gold_context_probe(case(), context_text="Returns are allowed for 30 days.", endpoint="http://127.0.0.1:8000/v1", model="fixture", dry_run=True)
     assert result["status"] == "DRY_RUN"
     assert result["request_sent"] is False
     assert result["required_fact_checks"]["matched"] == 1
@@ -153,7 +153,7 @@ def test_rag_cli_smoke(tmp_path, capsys):
     assert "improved" in capsys.readouterr().out
     context = tmp_path / "gold.md"
     context.write_text("Returns are allowed for 30 days.", encoding="utf-8")
-    assert main(["rag", "probe", "gold-context", "--case", str(case_path), "--context-file", str(context), "--endpoint", "http://127.0.0.1:11535/v1", "--model", "fixture", "--dry-run"]) == 0
+    assert main(["rag", "probe", "gold-context", "--case", str(case_path), "--context-file", str(context), "--endpoint", "http://127.0.0.1:8000/v1", "--model", "fixture", "--dry-run"]) == 0
 
 
 def test_rag_cli_help(capsys):
