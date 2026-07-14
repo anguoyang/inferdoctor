@@ -106,6 +106,20 @@ def test_trace_validate_rejects_unredacted_private_content_without_explicit_expo
     assert validate_trace_file(path)["status"] == "FAIL"
 
 
+def test_trace_validate_allows_redacted_question_hash(tmp_path):
+    item = trace()
+    item["input"] = {"original_question": None, "original_question_sha256": "a" * 64, "language": "unknown"}
+    item["privacy"] = {"content_included": False, "redaction_applied": True, "private_data_present": False, "export_mode": "redacted"}
+    path = write(tmp_path / "trace-redacted-question.json", item)
+    assert validate_trace_file(path)["status"] == "PASS"
+
+
+def test_diagnose_reports_evidence_completeness():
+    result = diagnose_rag(case(), trace())
+    assert "evidence_completeness" in result
+    assert "retrieval_candidates" in result["evidence_completeness"]["available"]
+
+
 def test_diagnose_retrieval_failure():
     result = diagnose_rag(case(), trace(retrieved=False))
     assert result["status"] == "FAIL"

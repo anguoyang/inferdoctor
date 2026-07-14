@@ -218,8 +218,11 @@ def validate_trace_object(trace: Dict[str, Any]) -> List[Dict[str, str]]:
     for field in ("trace_id", "timestamp", "system", "pipeline", "input", "retrieval", "context_selection", "generation", "postprocessing", "timings", "privacy"):
         if field not in trace:
             findings.append(_finding("FAIL", field, f"{field} is required"))
-    if not isinstance(trace.get("input", {}).get("original_question") if isinstance(trace.get("input"), dict) else None, str):
-        findings.append(_finding("FAIL", "input.original_question", "original_question is required"))
+    input_data = trace.get("input") if isinstance(trace.get("input"), dict) else {}
+    has_question_text = isinstance(input_data.get("original_question"), str) and bool(input_data.get("original_question"))
+    has_question_hash = isinstance(input_data.get("original_question_sha256"), str) and len(str(input_data.get("original_question_sha256"))) >= 16
+    if not has_question_text and not has_question_hash:
+        findings.append(_finding("FAIL", "input.original_question", "original_question or original_question_sha256 is required"))
     retrieval = trace.get("retrieval")
     if isinstance(retrieval, dict):
         candidates = retrieval.get("candidates", [])
@@ -319,6 +322,30 @@ def _forbidden_claims(case: Dict[str, Any], text: str) -> Dict[str, Any]:
     return {"hits": hits, "human_review": human_review}
 
 
+
+def _trace_evidence_summary(trace: Dict[str, Any]) -> Dict[str, Any]:
+    checks = {
+        "question_text_or_hash": bool(trace.get("input", {}).get("original_question") or trace.get("input", {}).get("original_question_sha256")),
+        "retrieval_candidates": bool(trace.get("retrieval", {}).get("candidates")),
+        "retrieval_latency": trace.get("retrieval", {}).get("latency_ms") is not None,
+        "rerank_status": bool(trace.get("rerank", {}).get("status")) if isinstance(trace.get("rerank"), dict) else False,
+        "context_text_or_hash": bool(trace.get("context_selection", {}).get("context_text") or trace.get("context_selection", {}).get("context_sha256")),
+        "context_budget": trace.get("context_selection", {}).get("context_budget") is not None,
+        "prompt_hash": bool(trace.get("prompt", {}).get("prompt_sha256")),
+        "grounding_signal": trace.get("prompt", {}).get("grounding_instruction_present") is not None,
+        "raw_answer_hash_or_text": bool(trace.get("generation", {}).get("raw_answer") or trace.get("generation", {}).get("raw_answer_sha256")),
+        "final_answer_hash_or_text": bool(trace.get("postprocessing", {}).get("final_answer") or trace.get("postprocessing", {}).get("final_answer_sha256")),
+        "ttft": trace.get("generation", {}).get("ttft_ms") is not None,
+        "token_usage": bool(trace.get("generation", {}).get("token_usage")),
+        "conversation_metadata": trace.get("conversation", {}).get("history_included") is not None,
+        "stage_events": bool(trace.get("stage_events")),
+    }
+    return {
+        "available": [key for key, value in checks.items() if value],
+        "missing_or_redacted": [key for key, value in checks.items() if not value],
+    }
+
+
 def diagnose_rag(case: Dict[str, Any], trace: Dict[str, Any]) -> Dict[str, Any]:
     case_findings = validate_case_object(case)
     trace_findings = validate_trace_object(trace)
@@ -373,8 +400,10 @@ def diagnose_rag(case: Dict[str, Any], trace: Dict[str, Any]) -> Dict[str, Any]:
         add("conversation_memory_contamination", "warn", ["Conversation history was included and contamination signals were reported."], "possible", "medium", "Replay the same question as a single-turn trace.")
     if not diagnoses:
         add("no_clear_failure", "pass", ["No deterministic failure was identified from available evidence."], "observed", "medium", "Add more trace fields or run Gold Context Probe if the answer is still unacceptable.")
-    evidence_score = max(0, 100 - 15 * len([d for d in diagnoses if d["category"] == "insufficient_evidence"]))
-    return {"schema_version": RAG_DIAGNOSIS_SCHEMA_VERSION, "timestamp": utc_now(), "inferdoctor_version": __version__, "case_id": case.get("case_id"), "trace_id": trace.get("trace_id"), "status": "FAIL" if any(d["status"] == "fail" for d in diagnoses) else "WARN" if any(d["status"] == "warn" for d in diagnoses) else "PASS", "evidence_completeness_score": evidence_score, "diagnoses": diagnoses, "required_fact_coverage": {"context": context_coverage, "final_answer": final_coverage}, "forbidden_claims": _forbidden_claims(case, final or raw)}
+    evidence_summary = _trace_evidence_summary(trace)
+    missing_count = len(evidence_summary["missing_or_redacted"])
+    evidence_score = max(0, 100 - 12 * len([d for d in diagnoses if d["category"] == "insufficient_evidence"]) - min(40, missing_count * 3))
+    return {"schema_version": RAG_DIAGNOSIS_SCHEMA_VERSION, "timestamp": utc_now(), "inferdoctor_version": __version__, "case_id": case.get("case_id"), "trace_id": trace.get("trace_id"), "status": "FAIL" if any(d["status"] == "fail" for d in diagnoses) else "WARN" if any(d["status"] == "warn" for d in diagnoses) else "PASS", "evidence_completeness_score": evidence_score, "evidence_completeness": evidence_summary, "diagnoses": diagnoses, "required_fact_coverage": {"context": context_coverage, "final_answer": final_coverage}, "forbidden_claims": _forbidden_claims(case, final or raw)}
 
 
 def compare_rag(case: Dict[str, Any], before: Dict[str, Any], after: Dict[str, Any]) -> Dict[str, Any]:
