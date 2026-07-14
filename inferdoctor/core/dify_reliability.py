@@ -579,6 +579,10 @@ def diagnose_root_causes(observations: Sequence[Dict[str, Any]], *, role: str = 
         add("Dify SSRF Proxy or security policy rejection", "high", "SSRF-related evidence was observed.", "inferdoctor dify selfhost inspect --compose-file ./docker-compose.yaml --services ssrf_proxy --details")
     if "plugin daemon" in texts or "plugin not found" in texts:
         add("Plugin Daemon or plugin availability problem", "high", "Plugin Daemon/plugin-not-found evidence was observed.", "inferdoctor dify selfhost inspect --compose-file ./docker-compose.yaml --services plugin_daemon --details")
+    if "worker" in texts and ("indexing" in texts or "retrieval" in texts or "queue" in texts):
+        add("Worker or indexing pipeline problem", "medium", "Worker/indexing evidence appeared before retrieval symptoms.", "inferdoctor dify selfhost inspect --compose-file ./docker-compose.yaml --services worker --details")
+    if "migration" in texts or "version mismatch" in texts or "mixed version" in texts:
+        add("Upgrade or version drift risk", "medium", "Migration or version-drift evidence was observed.", "Collect an evidence bundle before changing versions or rolling back.")
     if role == "embedding" and layers.get("host") == "pass":
         add("Embedding role may be unavailable even if chat works", "medium", "Role-specific check requested for embedding.", "Run a role-specific Provider test; do not treat chat success as embedding success.")
     if not candidates:

@@ -204,3 +204,61 @@ def test_dify_cli_help_pages(capsys):
         except SystemExit as exc:
             assert exc.code == 0
             assert "usage:" in capsys.readouterr().out
+
+
+def _obs(component, role, layer, status, summary, detail="", signature=None):
+    return make_observation(
+        component=component,
+        component_role=role,
+        layer=layer,
+        source_type="fixture",
+        source_reference=component,
+        check_name="golden",
+        status=status,
+        summary=summary,
+        sanitized_detail=detail,
+        error_signature=signature,
+    )
+
+
+def test_issue_golden_path_host_loopback_problem():
+    evidence = [
+        _obs("endpoint", "chat", "host", "pass", "Host TCP connection succeeded."),
+        _obs("api", "container_direct", "container", "warn", "Container-direct model probe failed.", "connection refused"),
+    ]
+    candidates = diagnose_root_causes(evidence)
+    assert candidates[0]["candidate"] == "Docker-network or container addressing problem"
+
+
+def test_issue_golden_path_ssrf_mediated_failure():
+    evidence = [
+        _obs("endpoint", "chat", "host", "pass", "Host HTTP route returned 200."),
+        _obs("api", "container_direct", "container", "pass", "Container-direct model probe succeeded."),
+        _obs("ssrf_proxy", "ssrf_proxy", "logs", "warn", "SSRF proxy rejected private address", "blocked address", "ssrf_rejection"),
+    ]
+    candidates = diagnose_root_causes(evidence)
+    assert candidates[0]["candidate"] == "Dify SSRF Proxy or security policy rejection"
+
+
+def test_issue_golden_path_worker_rag_downstream_symptom():
+    evidence = [
+        _obs("worker", "worker", "logs", "warn", "Worker indexing queue error", "retrieval empty after indexing failure"),
+        _obs("workflow", "rag", "dify_provider", "fail", "Workflow retrieval was empty"),
+    ]
+    candidates = diagnose_root_causes(evidence)
+    assert any(item["candidate"] == "Worker or indexing pipeline problem" for item in candidates)
+
+
+def test_issue_golden_path_version_drift():
+    evidence = [
+        _obs("api", "api", "logs", "warn", "migration error after upgrade", "version mismatch between api and worker", "migration_error"),
+    ]
+    candidates = diagnose_root_causes(evidence)
+    assert any(item["candidate"] == "Upgrade or version drift risk" for item in candidates)
+
+
+def test_issue_golden_path_no_docker_daemon(tmp_path):
+    compose = _compose(tmp_path)
+    report = run_dify_selfhost_preflight(compose_file=str(compose), runner=FakeRunner(docker_ok=False))
+    assert report["status"] == "ATTENTION"
+    assert "Docker CLI or daemon is unavailable" in render_reliability_report(report)
