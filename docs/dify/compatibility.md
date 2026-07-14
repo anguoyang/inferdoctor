@@ -83,6 +83,22 @@ Public endpoints require `--allow-public`.
 
 InferDoctor never scans for Dify, never follows a live endpoint inferred from a DSL file, and never sends private documents in smoke tests.
 
+
+## Verified Import Compatibility Profile
+
+The current `local-private-rag` kit uses a v2 Dify Chatflow-style DSL structure with top-level `app`, `dependencies`, `kind`, `version`, and a React Flow-style `workflow.graph`.
+
+This structure has been manually imported into a current Dify Cloud workspace. The import completed, the Chatflow canvas rendered, and the four-node canary flow loaded:
+
+- Start
+- Knowledge Retrieval
+- LLM
+- Answer
+
+The model provider and knowledge-base references intentionally remain unresolved after import. Users must bind their own model provider, model, and knowledge base inside Dify before publishing or testing a live app.
+
+This verification applies to the tested current Dify Cloud DSL structure. It does not guarantee compatibility with every Dify Cloud, Community, or self-hosted release. InferDoctor still reports offline validation separately from live import verification, and generated future DSLs must not claim live import verification unless they are verified.
+
 ## Validation Levels
 
 The Dify kit workflow uses explicit validation levels:
