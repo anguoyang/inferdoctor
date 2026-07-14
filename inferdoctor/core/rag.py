@@ -234,7 +234,8 @@ def validate_trace_object(trace: Dict[str, Any]) -> List[Dict[str, str]]:
                     findings.append(_finding("FAIL", f"retrieval.candidates[{index}]", "candidate requires chunk_id and rank"))
     privacy = trace.get("privacy")
     if isinstance(privacy, dict):
-        if privacy.get("private_data_present") is True and privacy.get("redaction_applied") is not True:
+        explicit_content_export = privacy.get("content_included") is True and str(privacy.get("export_mode") or "").lower() in {"include_content", "explicit_content", "synthetic"}
+        if privacy.get("private_data_present") is True and privacy.get("redaction_applied") is not True and not explicit_content_export:
             findings.append(_finding("FAIL", "privacy", "private_data_present requires redaction_applied unless explicitly exporting private content"))
     return findings
 

@@ -82,6 +82,30 @@ def test_trace_validate(tmp_path):
     assert validate_trace_file(path)["status"] == "PASS"
 
 
+def test_trace_validate_allows_explicit_private_content_export(tmp_path):
+    item = trace()
+    item["privacy"] = {
+        "content_included": True,
+        "redaction_applied": False,
+        "private_data_present": True,
+        "export_mode": "include_content",
+    }
+    path = write(tmp_path / "trace-private.json", item)
+    assert validate_trace_file(path)["status"] == "PASS"
+
+
+def test_trace_validate_rejects_unredacted_private_content_without_explicit_export(tmp_path):
+    item = trace()
+    item["privacy"] = {
+        "content_included": False,
+        "redaction_applied": False,
+        "private_data_present": True,
+        "export_mode": "redacted",
+    }
+    path = write(tmp_path / "trace-private-bad.json", item)
+    assert validate_trace_file(path)["status"] == "FAIL"
+
+
 def test_diagnose_retrieval_failure():
     result = diagnose_rag(case(), trace(retrieved=False))
     assert result["status"] == "FAIL"
