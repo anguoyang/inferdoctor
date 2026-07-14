@@ -82,6 +82,12 @@ def test_trace_validate(tmp_path):
     assert validate_trace_file(path)["status"] == "PASS"
 
 
+def test_trace_validate_pretty_json(tmp_path):
+    path = tmp_path / "trace-pretty.json"
+    path.write_text(json.dumps(trace(), indent=2), encoding="utf-8")
+    assert validate_trace_file(path)["status"] == "PASS"
+
+
 def test_trace_validate_allows_explicit_private_content_export(tmp_path):
     item = trace()
     item["privacy"] = {

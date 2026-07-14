@@ -47,16 +47,17 @@ def _load_json_or_jsonl(path: str | Path) -> List[Dict[str, Any]]:
     stripped = text.strip()
     if not stripped:
         raise RagError("input file is empty")
-    if stripped.startswith("["):
-        parsed = json.loads(stripped)
-        if not isinstance(parsed, list):
+    if stripped.startswith("[") or stripped.startswith("{"):
+        try:
+            parsed = json.loads(stripped)
+        except json.JSONDecodeError:
+            parsed = None
+        if isinstance(parsed, list):
+            return [item for item in parsed if isinstance(item, dict)]
+        if isinstance(parsed, dict):
+            return [parsed]
+        if stripped.startswith("["):
             raise RagError("JSON array input must contain objects")
-        return [item for item in parsed if isinstance(item, dict)]
-    if stripped.startswith("{") and "\n" not in stripped:
-        parsed = json.loads(stripped)
-        if not isinstance(parsed, dict):
-            raise RagError("JSON object input must be an object")
-        return [parsed]
     rows: List[Dict[str, Any]] = []
     for line_no, line in enumerate(text.splitlines(), start=1):
         if not line.strip():
