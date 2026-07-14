@@ -122,20 +122,24 @@ InferDoctor v0.7 development adds Dify workflows for local, LAN, private, self-h
 
 ```bash
 inferdoctor dify check
+inferdoctor dify selfhost preflight --compose-file ./docker-compose.yaml
+inferdoctor dify selfhost inspect --compose-file ./docker-compose.yaml
+inferdoctor dify connectivity check --compose-file ./docker-compose.yaml --endpoint http://192.168.1.20:8000/v1 --runtime openai-compatible --role chat --allow-non-local
+inferdoctor dify evidence collect --compose-file ./docker-compose.yaml --since 10m --output evidence.json
+inferdoctor dify evidence explain evidence.json --format markdown --output diagnosis.md
 inferdoctor dify template export local-private-rag --output ./dify-rag
 inferdoctor dify validate ./dify-rag
 inferdoctor dify smoke --kit ./dify-rag --dry-run
-inferdoctor dify perf --base-url http://127.0.0.1:5001/v1 --runs 2 --warmup 1 --format json --output dify-perf.json
-inferdoctor dify optimize --report dify-perf.json --kit ./dify-rag
 ```
 
-The Dify workflow is read-only by default. It does not install Dify, import DSLs automatically, create knowledge bases, upload documents, store API keys, or treat smoke tests as formal benchmarks.
+Dify builds the application. InferDoctor checks whether the host, containers, Plugin Daemon, Sandbox, SSRF Proxy, model endpoints, and knowledge infrastructure can work together. The workflow is read-only by default. It does not install Dify, restart containers, import DSLs automatically, create knowledge bases, upload documents, store API keys, or treat smoke tests as formal benchmarks.
 
 Docs:
 
 - [Dify getting started](https://github.com/anguoyang/inferdoctor/blob/main/docs/dify/getting_started.md)
 - [Local / Private RAG Kit](https://github.com/anguoyang/inferdoctor/blob/main/docs/dify/local_private_rag.md)
 - [Dify compatibility](https://github.com/anguoyang/inferdoctor/blob/main/docs/dify/compatibility.md)
+- [Dify self-host reliability](https://github.com/anguoyang/inferdoctor/blob/main/docs/dify/selfhost_reliability.md)
 - [Dify security](https://github.com/anguoyang/inferdoctor/blob/main/docs/dify/security.md)
 - [Dify reference example](https://github.com/anguoyang/inferdoctor/tree/main/examples/dify/local_private_rag)
 

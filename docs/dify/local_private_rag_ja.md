@@ -53,3 +53,24 @@ inferdoctor dify optimize --report after.json --kit ./dify-local-private-rag
 これらは正式なベンチマークではありません。モデル品質、同時実行、長時間負荷、Dify 内部ワーカーの詳細なプロファイルは測定しません。
 
 秘密情報や社内文書をスモークテストに使わないでください。
+
+
+## Self-host Reliability Doctor
+
+v0.7 開発版では、Dify の self-host 環境を読み取り専用で確認する診断コマンドも追加されています。
+
+```bash
+inferdoctor dify selfhost preflight --compose-file ./docker-compose.yaml
+inferdoctor dify selfhost inspect --compose-file ./docker-compose.yaml
+inferdoctor dify connectivity check --compose-file ./docker-compose.yaml --endpoint http://192.168.1.20:8000/v1 --runtime openai-compatible --role chat --allow-non-local
+inferdoctor dify evidence collect --compose-file ./docker-compose.yaml --since 10m --output evidence.json
+inferdoctor dify evidence explain evidence.json --format markdown --output diagnosis.md
+```
+
+Dify はアプリケーションを構築・実行する基盤です。InferDoctor は、ホスト、Docker Compose、Plugin Daemon、Sandbox、SSRF Proxy、モデルエンドポイント、Knowledge 関連コンポーネントが連携できているかを確認します。
+
+これらの診断は読み取り専用です。Dify のインストール、コンテナの起動・停止・再起動、Docker イメージの取得、`.env` の変更、秘密情報の収集、完全なログの保存は行いません。
+
+Cloud 版 Dify では、明示的に指定された App API に対する外部観測はできます。ただし、Plugin Daemon や SSRF Proxy などの深い原因切り分けには self-host 側の証拠が必要です。
+
+これは正式なベンチマークではありません。スモークテストと根本原因候補の整理を目的とした、安全で範囲を限定した診断です。
