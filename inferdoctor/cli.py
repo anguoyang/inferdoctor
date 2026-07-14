@@ -70,6 +70,18 @@ from inferdoctor.core.perf_baseline import (
 )
 from inferdoctor.core.perf_compare import compare_performance_files, render_comparison
 from inferdoctor.core.recommendations import recommend_stack, render_recommendation
+from inferdoctor.core.rag import (
+    RagError,
+    compare_rag,
+    diagnose_rag,
+    init_case_template,
+    load_case,
+    load_trace,
+    render_rag_result,
+    run_gold_context_probe,
+    validate_case_file,
+    validate_trace_file,
+)
 from inferdoctor.core.quickstart import (
     QUICKSTART_GOALS,
     QUICKSTART_HARDWARE,
@@ -516,6 +528,49 @@ def _parser() -> argparse.ArgumentParser:
     dify_knowledge_check.add_argument("--allow-public", action="store_true")
     dify_knowledge_check.add_argument("--format", choices=("console", "json", "markdown"), default="console")
     dify_knowledge_check.add_argument("--output", help="Write output to this file")
+
+    rag = subparsers.add_parser("rag", help="Diagnose RAG answer quality with deterministic layered evidence")
+    rag_subparsers = rag.add_subparsers(dest="rag_command", required=True)
+    rag_case = rag_subparsers.add_parser("case", help="Create and validate RAG Case files")
+    rag_case_subparsers = rag_case.add_subparsers(dest="rag_case_command", required=True)
+    rag_case_init = rag_case_subparsers.add_parser("init", help="Write a fictional RAG Case JSONL template")
+    rag_case_init.add_argument("--output", required=True)
+    rag_case_validate = rag_case_subparsers.add_parser("validate", help="Validate a RAG Case JSON or JSONL file")
+    rag_case_validate.add_argument("path")
+    rag_case_validate.add_argument("--format", choices=("console", "json", "markdown"), default="console")
+    rag_case_validate.add_argument("--output")
+    rag_trace = rag_subparsers.add_parser("trace", help="Validate RAG Trace files")
+    rag_trace_subparsers = rag_trace.add_subparsers(dest="rag_trace_command", required=True)
+    rag_trace_validate = rag_trace_subparsers.add_parser("validate", help="Validate a RAG Trace JSON file")
+    rag_trace_validate.add_argument("path")
+    rag_trace_validate.add_argument("--format", choices=("console", "json", "markdown"), default="console")
+    rag_trace_validate.add_argument("--output")
+    rag_diagnose = rag_subparsers.add_parser("diagnose", help="Diagnose one RAG Case + Trace with layered deterministic evidence")
+    rag_diagnose.add_argument("--case", required=True)
+    rag_diagnose.add_argument("--trace", required=True)
+    rag_diagnose.add_argument("--format", choices=("console", "json", "markdown"), default="console")
+    rag_diagnose.add_argument("--output")
+    rag_compare = rag_subparsers.add_parser("compare", help="Compare before/after RAG traces for one Case")
+    rag_compare.add_argument("--case", required=True)
+    rag_compare.add_argument("--before", required=True)
+    rag_compare.add_argument("--after", required=True)
+    rag_compare.add_argument("--format", choices=("console", "json", "markdown"), default="console")
+    rag_compare.add_argument("--output")
+    rag_probe = rag_subparsers.add_parser("probe", help="Run bounded RAG diagnostic probes")
+    rag_probe_subparsers = rag_probe.add_subparsers(dest="rag_probe_command", required=True)
+    rag_gold = rag_probe_subparsers.add_parser("gold-context", help="Probe whether a model can answer when explicit gold context is supplied")
+    rag_gold.add_argument("--case", required=True)
+    rag_gold.add_argument("--context-file", required=True)
+    rag_gold.add_argument("--endpoint", required=True)
+    rag_gold.add_argument("--model", required=True)
+    rag_gold.add_argument("--api-key-env", help="Environment variable containing an API key, if needed")
+    rag_gold.add_argument("--timeout", type=_positive_float, default=30.0)
+    rag_gold.add_argument("--dry-run", action="store_true")
+    rag_gold.add_argument("--allow-non-local", action="store_true")
+    rag_gold.add_argument("--allow-public", action="store_true")
+    rag_gold.add_argument("--retain-answer", action="store_true", help="Retain a short generated answer preview in the report")
+    rag_gold.add_argument("--format", choices=("console", "json", "markdown"), default="console")
+    rag_gold.add_argument("--output")
 
     def add_dify_compose_options(command):
         command.add_argument("--compose-file", help="Dify Docker Compose file to inspect read-only")
@@ -1109,6 +1164,42 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 print("inferdoctor: {0}".format(exc), file=sys.stderr)
                 return 2
 
+
+    if args.command == "rag":
+        try:
+            if args.rag_command == "case":
+                if args.rag_case_command == "init":
+                    output = init_case_template(args.output)
+                    print("Wrote RAG Case template: {0}".format(output))
+                    return 0
+                if args.rag_case_command == "validate":
+                    result = validate_case_file(args.path)
+                    _emit_output(render_rag_result(result, args.format), args.output)
+                    return 1 if result.get("status") == "FAIL" else 0
+            if args.rag_command == "trace" and args.rag_trace_command == "validate":
+                result = validate_trace_file(args.path)
+                _emit_output(render_rag_result(result, args.format), args.output)
+                return 1 if result.get("status") == "FAIL" else 0
+            if args.rag_command == "diagnose":
+                result = diagnose_rag(load_case(args.case), load_trace(args.trace))
+                _emit_output(render_rag_result(result, args.format), args.output)
+                return 1 if result.get("status") == "FAIL" else 0
+            if args.rag_command == "compare":
+                result = compare_rag(load_case(args.case), load_trace(args.before), load_trace(args.after))
+                _emit_output(render_rag_result(result, args.format), args.output)
+                return 1 if result.get("verdict") in {"regressed", "incompatible"} else 0
+            if args.rag_command == "probe" and args.rag_probe_command == "gold-context":
+                api_key = None
+                if args.api_key_env:
+                    import os
+                    api_key = os.environ.get(args.api_key_env)
+                context_text = Path(args.context_file).read_text(encoding="utf-8")
+                result = run_gold_context_probe(load_case(args.case), context_text=context_text, endpoint=args.endpoint, model=args.model, timeout=args.timeout, dry_run=args.dry_run, allow_non_local=args.allow_non_local, allow_public=args.allow_public, api_key=api_key, retain_answer=args.retain_answer)
+                _emit_output(render_rag_result(result, args.format), args.output)
+                return 1 if result.get("status") == "FAIL" else 0
+        except (RagError, OSError, json.JSONDecodeError) as exc:
+            print("inferdoctor: {0}".format(exc), file=sys.stderr)
+            return 2
 
     if args.command == "dify":
         try:

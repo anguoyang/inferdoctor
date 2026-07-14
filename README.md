@@ -143,6 +143,13 @@ Docs:
 - [Dify security](https://github.com/anguoyang/inferdoctor/blob/main/docs/dify/security.md)
 - [Dify reference example](https://github.com/anguoyang/inferdoctor/tree/main/examples/dify/local_private_rag)
 
+
+## RAG Intelligence Development
+
+InferDoctor development now includes a framework-neutral RAG Intelligence Doctor for diagnosing why a running RAG app gives incomplete or ungrounded answers. It uses Case and Trace schemas, layered diagnosis, before/after comparison, and a Gold Context Probe.
+
+Docs: [RAG Intelligence Doctor](https://github.com/anguoyang/inferdoctor/blob/main/docs/rag/README.md)
+
 ## Language Support
 
 InferDoctor includes first-step localization for the health dashboard and `inferdoctor check` console summary.
