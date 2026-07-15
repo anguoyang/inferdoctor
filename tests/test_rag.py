@@ -3,6 +3,8 @@ from pathlib import Path
 
 import pytest
 
+from inferdoctor.core import rag as rag_module
+
 from inferdoctor.cli import main
 from inferdoctor.core.rag import (
     RAG_CASE_SCHEMA_VERSION,
@@ -158,6 +160,123 @@ def test_gold_context_probe_dry_run():
     assert result["status"] == "DRY_RUN"
     assert result["request_sent"] is False
     assert result["required_fact_checks"]["matched"] == 1
+
+class _FakeOpenAIResponse:
+    def __init__(self, answer: str):
+        self.answer = answer
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_exc):
+        return False
+
+    def read(self, _limit: int) -> bytes:
+        return json.dumps({"choices": [{"message": {"content": self.answer}}]}).encode("utf-8")
+
+
+def _gold_case(required_facts, forbidden_claims=None):
+    item = case()
+    item["required_facts"] = required_facts
+    item["forbidden_claims"] = forbidden_claims or []
+    return item
+
+
+def _mock_gold_probe(monkeypatch, answer: str, probe_case=None):
+    monkeypatch.setattr(rag_module.urllib.request, "urlopen", lambda *_args, **_kwargs: _FakeOpenAIResponse(answer))
+    return run_gold_context_probe(
+        probe_case or case(),
+        context_text="Synthetic gold context.",
+        endpoint="http://127.0.0.1:8000/v1",
+        model="fixture",
+    )
+
+
+def test_gold_context_probe_transport_pass_evaluation_pass(monkeypatch):
+    probe_case = _gold_case([
+        {"fact_id": "return-code", "description": "Return policy code", "match_terms": ["RETURN-14"], "match_mode": "exact_phrase"},
+        {"fact_id": "defect-code", "description": "Defect policy code", "match_terms": ["DEFECT-30"], "match_mode": "exact_phrase"},
+    ])
+    result = _mock_gold_probe(monkeypatch, "Use RETURN-14 and DEFECT-30.", probe_case)
+    assert result["transport_status"] == "pass"
+    assert result["evaluation_status"] == "pass"
+    assert result["overall_status"] == "pass"
+    assert result["status"] == "PASS"
+    assert result["required_facts_total"] == 2
+    assert result["required_facts_matched"] == 2
+    assert result["answer_retained"] is False
+    assert result["answer_evaluated_in_memory"] is True
+    assert result["answer_preview"] is None
+
+
+def test_gold_context_probe_transport_pass_evaluation_fail(monkeypatch):
+    probe_case = _gold_case([
+        {"fact_id": "return-code", "description": "Return policy code", "match_terms": ["RETURN-14"], "match_mode": "exact_phrase"},
+        {"fact_id": "defect-code", "description": "Defect policy code", "match_terms": ["DEFECT-30"], "match_mode": "exact_phrase"},
+    ])
+    result = _mock_gold_probe(monkeypatch, "Use RETURN-14 only.", probe_case)
+    assert result["transport_status"] == "pass"
+    assert result["evaluation_status"] == "fail"
+    assert result["overall_status"] == "fail"
+    assert result["status"] == "FAIL"
+    assert result["required_facts_matched"] == 1
+    assert result["required_fact_checks"]["results"][1]["missing_terms"] == ["DEFECT-30"]
+
+
+def test_gold_context_probe_transport_fail(monkeypatch):
+    def fail(*_args, **_kwargs):
+        raise rag_module.urllib.error.URLError("connection refused")
+
+    monkeypatch.setattr(rag_module.urllib.request, "urlopen", fail)
+    result = run_gold_context_probe(case(), context_text="Synthetic context.", endpoint="http://127.0.0.1:8000/v1", model="fixture")
+    assert result["transport_status"] == "fail"
+    assert result["evaluation_status"] == "skipped"
+    assert result["overall_status"] == "request_failed"
+    assert result["status"] == "FAIL"
+
+
+def test_gold_context_probe_human_review_only_is_inconclusive(monkeypatch):
+    probe_case = _gold_case([
+        {"fact_id": "semantic", "description": "Needs semantic review", "match_terms": [], "match_mode": "human_review"},
+    ])
+    result = _mock_gold_probe(monkeypatch, "A plausible answer.", probe_case)
+    assert result["evaluation_status"] == "inconclusive"
+    assert result["overall_status"] == "inconclusive"
+    assert result["status"] == "INCONCLUSIVE"
+    assert result["human_review_required"] is True
+
+
+def test_gold_context_probe_mixed_human_review_requires_review(monkeypatch):
+    probe_case = _gold_case([
+        {"fact_id": "code", "description": "Policy code", "match_terms": ["RETURN-14"], "match_mode": "exact_phrase"},
+        {"fact_id": "semantic", "description": "Needs semantic review", "match_terms": [], "match_mode": "human_review"},
+    ])
+    result = _mock_gold_probe(monkeypatch, "Use RETURN-14.", probe_case)
+    assert result["evaluation_status"] == "pass"
+    assert result["overall_status"] == "inconclusive"
+    assert result["review_status"] == "required"
+
+
+def test_gold_context_probe_forbidden_claim_present(monkeypatch):
+    probe_case = _gold_case(
+        [{"fact_id": "code", "description": "Policy code", "match_terms": ["RETURN-14"], "match_mode": "exact_phrase"}],
+        [{"claim_id": "wrong", "description": "Wrong no-refund claim", "match_terms": ["no refunds"], "match_mode": "any_term"}],
+    )
+    result = _mock_gold_probe(monkeypatch, "Use RETURN-14. There are no refunds.", probe_case)
+    assert result["evaluation_status"] == "fail"
+    assert result["overall_status"] == "fail"
+    assert result["forbidden_claims_matched"] == 1
+
+
+def test_gold_context_probe_normalizes_unicode_punctuation_and_whitespace(monkeypatch):
+    probe_case = _gold_case([
+        {"fact_id": "return-code", "description": "Return policy code", "match_terms": ["RETURN-14"], "match_mode": "exact_phrase"},
+        {"fact_id": "defect-terms", "description": "Defect terms", "match_terms": ["defective", "30 days"], "match_mode": "all_terms"},
+        {"fact_id": "any-term", "description": "Any term", "match_terms": ["missing", "opened"], "match_mode": "any_term"},
+    ])
+    result = _mock_gold_probe(monkeypatch, "Policy RETURN－14 applies. Defective items: 30   days when opened.", probe_case)
+    assert result["overall_status"] == "pass"
+    assert result["required_facts_matched"] == 3
 
 
 def test_rag_cli_smoke(tmp_path, capsys):

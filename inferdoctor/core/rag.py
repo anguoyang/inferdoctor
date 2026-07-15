@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import time
+import unicodedata
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -251,18 +253,32 @@ def validate_trace_file(path: str | Path) -> Dict[str, Any]:
     return {"schema_version": "inferdoctor.rag.trace.validation.v1", "status": status, "findings": findings}
 
 
-def _terms_match(text: str, terms: Sequence[str], mode: str) -> Optional[bool]:
-    lower = text.lower()
-    if mode == "human_review":
-        return None
-    if mode == "exact_phrase":
-        return all(term.lower() in lower for term in terms)
-    if mode == "all_terms":
-        return all(term.lower() in lower for term in terms)
-    if mode == "any_term":
-        return any(term.lower() in lower for term in terms)
-    return False
+def _normalize_match_text(text: str) -> str:
+    normalized = unicodedata.normalize("NFKC", str(text or "")).casefold()
+    normalized = re.sub(r"[\u2010-\u2015\u2212]", "-", normalized)
+    normalized = re.sub(r"[\s\u3000]+", " ", normalized)
+    normalized = re.sub(r"\s*([:;,.!?()\[\]{}<>/\\|+*=])\s*", r"\1", normalized)
+    return normalized.strip()
 
+
+def _match_term_details(text: str, terms: Sequence[str], mode: str) -> tuple[Optional[bool], list[str], list[str]]:
+    if mode == "human_review":
+        return None, [], [str(term) for term in terms if isinstance(term, str)]
+    normalized_text = _normalize_match_text(text)
+    pairs = [(str(term), _normalize_match_text(str(term))) for term in terms if isinstance(term, str) and term]
+    matched = [raw for raw, normalized in pairs if normalized and normalized in normalized_text]
+    missing = [raw for raw, normalized in pairs if normalized and normalized not in normalized_text]
+    if mode in {"exact_phrase", "all_terms"}:
+        outcome = bool(pairs) and not missing
+    elif mode == "any_term":
+        outcome = bool(matched)
+    else:
+        outcome = False
+    return outcome, matched, missing
+
+
+def _terms_match(text: str, terms: Sequence[str], mode: str) -> Optional[bool]:
+    return _match_term_details(text, terms, mode)[0]
 
 def _candidate_source_ids(trace: Dict[str, Any]) -> set[str]:
     return {str(candidate.get("source_id")) for candidate in trace.get("retrieval", {}).get("candidates", []) if isinstance(candidate, dict) and candidate.get("source_id")}
@@ -299,29 +315,64 @@ def _required_fact_coverage(case: Dict[str, Any], text: str) -> Dict[str, Any]:
             continue
         mode = fact.get("match_mode", "human_review")
         terms = fact.get("match_terms", [])
-        outcome = _terms_match(text, terms, mode)
+        outcome, matched_terms, missing_terms = _match_term_details(text, terms, mode)
         if outcome is None:
             human_review += 1
         else:
             deterministic += 1
             matched += 1 if outcome else 0
-        results.append({"fact_id": fact.get("fact_id"), "match_mode": mode, "matched": outcome})
-    return {"matched": matched, "deterministic": deterministic, "human_review": human_review, "results": results}
+        results.append({
+            "fact_id": fact.get("fact_id"),
+            "match_mode": mode,
+            "matched": outcome,
+            "matched_terms": matched_terms,
+            "missing_terms": missing_terms,
+        })
+    total = deterministic + human_review
+    return {
+        "matched": matched,
+        "deterministic": deterministic,
+        "human_review": human_review,
+        "total": total,
+        "deterministic_matched": matched,
+        "deterministic_failed": max(0, deterministic - matched),
+        "human_review_required": human_review > 0,
+        "results": results,
+    }
 
 
 def _forbidden_claims(case: Dict[str, Any], text: str) -> Dict[str, Any]:
     hits = []
+    results = []
+    deterministic = 0
     human_review = 0
     for claim in case.get("forbidden_claims", []) or []:
         if not isinstance(claim, dict):
             continue
-        outcome = _terms_match(text, claim.get("match_terms", []), claim.get("match_mode", "human_review"))
+        mode = claim.get("match_mode", "human_review")
+        outcome, matched_terms, missing_terms = _match_term_details(text, claim.get("match_terms", []), mode)
         if outcome is None:
             human_review += 1
-        elif outcome:
-            hits.append(claim.get("claim_id"))
-    return {"hits": hits, "human_review": human_review}
-
+        else:
+            deterministic += 1
+            if outcome:
+                hits.append(claim.get("claim_id"))
+        results.append({
+            "claim_id": claim.get("claim_id"),
+            "match_mode": mode,
+            "matched": outcome,
+            "matched_terms": matched_terms,
+            "missing_terms": missing_terms,
+        })
+    return {
+        "hits": hits,
+        "matched": len(hits),
+        "deterministic": deterministic,
+        "human_review": human_review,
+        "total": deterministic + human_review,
+        "human_review_required": human_review > 0,
+        "results": results,
+    }
 
 
 def _trace_evidence_summary(trace: Dict[str, Any]) -> Dict[str, Any]:
@@ -466,6 +517,55 @@ def _chat_payload(case: Dict[str, Any], context: str, *, retain_answer: bool) ->
     }
 
 
+def _gold_probe_evaluation(answer: str, case: Dict[str, Any]) -> Dict[str, Any]:
+    required = _required_fact_coverage(case, answer)
+    forbidden = _forbidden_claims(case, answer)
+    required_total = int(required.get("total") or 0)
+    required_deterministic = int(required.get("deterministic") or 0)
+    required_matched = int(required.get("matched") or 0)
+    forbidden_total = int(forbidden.get("total") or 0)
+    forbidden_hits = int(forbidden.get("matched") or 0)
+    human_review_required = bool(required.get("human_review_required") or forbidden.get("human_review_required"))
+    deterministic_available = required_deterministic > 0 or int(forbidden.get("deterministic") or 0) > 0
+
+    if forbidden_hits:
+        evaluation_status = "fail"
+        overall_status = "fail"
+        interpretation = "The model response contained a forbidden deterministic claim."
+    elif required_deterministic and required_matched < required_deterministic:
+        evaluation_status = "fail"
+        overall_status = "fail"
+        interpretation = "The model response did not satisfy all deterministic required facts."
+    elif not deterministic_available:
+        evaluation_status = "inconclusive"
+        overall_status = "inconclusive"
+        interpretation = "No deterministic checks were available; human review is required."
+    elif human_review_required:
+        evaluation_status = "pass"
+        overall_status = "inconclusive"
+        interpretation = "Deterministic checks passed, but at least one claim still requires human review."
+    else:
+        evaluation_status = "pass"
+        overall_status = "pass"
+        interpretation = "Transport succeeded and deterministic fact checks passed."
+
+    return {
+        "required_fact_checks": required,
+        "forbidden_claim_checks": forbidden,
+        "required_facts_total": required_total,
+        "required_facts_matched": required_matched,
+        "forbidden_claims_total": forbidden_total,
+        "forbidden_claims_matched": forbidden_hits,
+        "deterministic_checks_available": deterministic_available,
+        "human_review_required": human_review_required,
+        "evaluation_status": evaluation_status,
+        "review_status": "required" if human_review_required else "not_required",
+        "overall_status": overall_status,
+        "status": overall_status.upper(),
+        "diagnostic_interpretation": interpretation,
+    }
+
+
 def run_gold_context_probe(case: Dict[str, Any], *, context_text: str, endpoint: str, model: str, timeout: float = 30.0, dry_run: bool = False, allow_non_local: bool = False, allow_public: bool = False, api_key: Optional[str] = None, retain_answer: bool = False) -> Dict[str, Any]:
     safety = classify_endpoint(endpoint)
     if safety.category == "invalid":
@@ -477,6 +577,8 @@ def run_gold_context_probe(case: Dict[str, Any], *, context_text: str, endpoint:
     if safety.category == "public" and not allow_public:
         raise RagError("public endpoint requires --allow-public")
     payload_info = _chat_payload(case, context_text, retain_answer=retain_answer)
+    context_required = _required_fact_coverage(case, context_text)
+    context_forbidden = _forbidden_claims(case, context_text)
     result: Dict[str, Any] = {
         "schema_version": RAG_GOLD_PROBE_SCHEMA_VERSION,
         "timestamp": utc_now(),
@@ -489,13 +591,26 @@ def run_gold_context_probe(case: Dict[str, Any], *, context_text: str, endpoint:
         "context_length_chars": len(context_text),
         "prompt_hash": payload_info["prompt_hash"],
         "request_sent": False,
+        "request_status": "skipped" if dry_run else "pending",
+        "transport_status": "skipped" if dry_run else "unknown",
+        "evaluation_status": "skipped" if dry_run else "unknown",
+        "review_status": "unavailable" if dry_run else "unknown",
+        "overall_status": "dry_run" if dry_run else "unknown",
         "status": "DRY_RUN" if dry_run else "UNKNOWN",
         "ttft_ms": None,
         "total_latency_ms": None,
         "generated_answer_sha256": None,
         "answer_preview": None,
-        "required_fact_checks": _required_fact_coverage(case, context_text),
-        "forbidden_claim_checks": _forbidden_claims(case, context_text),
+        "answer_retained": bool(retain_answer),
+        "answer_evaluated_in_memory": False,
+        "required_fact_checks": context_required,
+        "forbidden_claim_checks": context_forbidden,
+        "required_facts_total": int(context_required.get("total") or 0),
+        "required_facts_matched": int(context_required.get("matched") or 0),
+        "forbidden_claims_total": int(context_forbidden.get("total") or 0),
+        "forbidden_claims_matched": int(context_forbidden.get("matched") or 0),
+        "deterministic_checks_available": bool(context_required.get("deterministic") or context_forbidden.get("deterministic")),
+        "human_review_required": bool(context_required.get("human_review_required") or context_forbidden.get("human_review_required")),
         "diagnostic_interpretation": "Dry run only; no model request was sent." if dry_run else "",
     }
     if dry_run:
@@ -514,19 +629,32 @@ def run_gold_context_probe(case: Dict[str, Any], *, context_text: str, endpoint:
             parsed = json.loads(data.decode("utf-8"))
         elapsed = int((time.perf_counter() - started) * 1000)
         answer = _extract_chat_answer(parsed)
+        evaluation = _gold_probe_evaluation(answer, case)
+        result.update(evaluation)
         result.update({
             "request_sent": True,
-            "status": "PASS",
+            "request_status": "sent",
+            "transport_status": "pass",
             "total_latency_ms": elapsed,
             "generated_answer_sha256": sha256_text(answer) if answer else None,
             "answer_preview": answer[:240] if retain_answer else None,
-            "required_fact_checks": _required_fact_coverage(case, answer),
-            "forbidden_claim_checks": _forbidden_claims(case, answer),
-            "diagnostic_interpretation": "Gold context probe completed. Use deterministic fact checks and human review where required.",
+            "answer_retained": bool(retain_answer),
+            "answer_evaluated_in_memory": True,
         })
         return result
     except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, RagError) as exc:
-        result.update({"request_sent": True, "status": "FAIL", "total_latency_ms": int((time.perf_counter() - started) * 1000), "error": str(exc)[:300], "diagnostic_interpretation": "Gold context probe failed before a usable answer was produced."})
+        result.update({
+            "request_sent": True,
+            "request_status": "sent",
+            "transport_status": "fail",
+            "evaluation_status": "skipped",
+            "review_status": "unavailable",
+            "overall_status": "request_failed",
+            "status": "FAIL",
+            "total_latency_ms": int((time.perf_counter() - started) * 1000),
+            "error": str(exc)[:300],
+            "diagnostic_interpretation": "Gold context probe failed before a usable answer was produced.",
+        })
         return result
 
 
@@ -567,7 +695,7 @@ def _render_console(result: Dict[str, Any]) -> str:
     elif "gold_context_probe" in schema:
         title = "RAG Gold Context Probe"
     lines = [title, "=" * len(title)]
-    for key in ("status", "verdict", "case_count", "case_id", "trace_id"):
+    for key in ("status", "overall_status", "transport_status", "evaluation_status", "review_status", "required_facts_matched", "required_facts_total", "forbidden_claims_matched", "forbidden_claims_total", "verdict", "case_count", "case_id", "trace_id"):
         if result.get(key) is not None:
             lines.append(f"{key}: {result.get(key)}")
     if result.get("findings"):
