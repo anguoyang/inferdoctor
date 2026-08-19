@@ -616,3 +616,459 @@ def test_compare_reports_first_broken_layer_change():
         ]
         is True
     )
+
+
+def test_ranking_failure_when_required_source_is_below_observed_top_k_prefix():
+    item = trace()
+
+    item["retrieval"][
+        "candidates"
+    ] = [
+        {
+            "chunk_id": "other-1",
+            "source_id": "other-a",
+            "rank": 1,
+            "score": 0.99,
+        },
+        {
+            "chunk_id": "other-2",
+            "source_id": "other-b",
+            "rank": 2,
+            "score": 0.95,
+        },
+        {
+            "chunk_id": "c1",
+            "source_id": "policy",
+            "rank": 3,
+            "score": 0.80,
+        },
+    ]
+
+    item["context_selection"][
+        "selected_chunk_ids"
+    ] = [
+        "other-1",
+        "other-2",
+    ]
+
+    item["context_selection"][
+        "context_text"
+    ] = "Irrelevant synthetic context."
+
+    item["generation"][
+        "raw_answer"
+    ] = "I do not know."
+
+    item["postprocessing"][
+        "final_answer"
+    ] = "I do not know."
+
+    result = diagnose_rag(
+        case(),
+        item,
+    )
+
+    categories = [
+        diagnosis["category"]
+        for diagnosis
+        in result["diagnoses"]
+    ]
+
+    assert "ranking_failure" in categories
+    assert (
+        "context_selection_failure"
+        not in categories
+    )
+
+    assert (
+        result["attribution"][
+            "first_broken_layer"
+        ]
+        == "ranking"
+    )
+
+    ranking = next(
+        diagnosis
+        for diagnosis
+        in result["diagnoses"]
+        if (
+            diagnosis["category"]
+            == "ranking_failure"
+        )
+    )
+
+    assert (
+        ranking["ranking_evidence"][
+            "method"
+        ]
+        == "observed_top_rank_prefix"
+    )
+
+    assert (
+        ranking["ranking_evidence"][
+            "best_source_rank"
+        ]
+        == 3
+    )
+
+    assert (
+        ranking["ranking_evidence"][
+            "effective_cutoff"
+        ]
+        == 2
+    )
+
+
+def test_explicit_ranking_drop_reason_is_high_confidence_ranking_failure():
+    item = trace()
+
+    item["retrieval"][
+        "candidates"
+    ] = [
+        {
+            "chunk_id": "other-1",
+            "source_id": "other",
+            "rank": 1,
+            "score": 0.95,
+        },
+        {
+            "chunk_id": "c1",
+            "source_id": "policy",
+            "rank": 2,
+            "score": 0.70,
+        },
+    ]
+
+    item["context_selection"][
+        "selected_chunk_ids"
+    ] = [
+        "other-1"
+    ]
+
+    item["context_selection"][
+        "drop_reasons"
+    ] = {
+        "c1": "below top_k cutoff"
+    }
+
+    result = diagnose_rag(
+        case(),
+        item,
+    )
+
+    ranking = next(
+        diagnosis
+        for diagnosis
+        in result["diagnoses"]
+        if (
+            diagnosis["category"]
+            == "ranking_failure"
+        )
+    )
+
+    assert (
+        ranking["confidence"]
+        == "high"
+    )
+
+    assert (
+        ranking["ranking_evidence"][
+            "method"
+        ]
+        == "explicit_drop_reason"
+    )
+
+    assert (
+        result["attribution"][
+            "first_broken_layer"
+        ]
+        == "ranking"
+    )
+
+
+def test_non_prefix_selection_remains_context_selection_failure():
+    item = trace()
+
+    item["retrieval"][
+        "candidates"
+    ] = [
+        {
+            "chunk_id": "c1",
+            "source_id": "policy",
+            "rank": 1,
+            "score": 0.99,
+        },
+        {
+            "chunk_id": "other-2",
+            "source_id": "other",
+            "rank": 2,
+            "score": 0.90,
+        },
+    ]
+
+    item["context_selection"][
+        "selected_chunk_ids"
+    ] = [
+        "other-2"
+    ]
+
+    result = diagnose_rag(
+        case(),
+        item,
+    )
+
+    categories = [
+        diagnosis["category"]
+        for diagnosis
+        in result["diagnoses"]
+    ]
+
+    assert (
+        "context_selection_failure"
+        in categories
+    )
+
+    assert "ranking_failure" not in categories
+
+    assert (
+        result["attribution"][
+            "first_broken_layer"
+        ]
+        == "context_selection"
+    )
+
+
+def test_selected_required_source_has_no_ranking_failure():
+    item = trace()
+
+    result = diagnose_rag(
+        case(),
+        item,
+    )
+
+    categories = [
+        diagnosis["category"]
+        for diagnosis
+        in result["diagnoses"]
+    ]
+
+    assert "ranking_failure" not in categories
+
+    assert (
+        "context_selection_failure"
+        not in categories
+    )
+
+
+
+def test_ranking_layer_chain_marks_retrieval_as_established_upstream():
+    item = trace()
+
+    item["retrieval"]["candidates"] = [
+        {
+            "chunk_id": "other-1",
+            "source_id": "other-a",
+            "rank": 1,
+            "score": 0.99,
+        },
+        {
+            "chunk_id": "other-2",
+            "source_id": "other-b",
+            "rank": 2,
+            "score": 0.95,
+        },
+        {
+            "chunk_id": "c1",
+            "source_id": "policy",
+            "rank": 3,
+            "score": 0.80,
+        },
+    ]
+
+    item["context_selection"][
+        "selected_chunk_ids"
+    ] = [
+        "other-1",
+        "other-2",
+    ]
+
+    result = diagnose_rag(
+        case(),
+        item,
+    )
+
+    chain = {
+        entry["layer"]: entry
+        for entry
+        in result["attribution"][
+            "layer_chain"
+        ]
+    }
+
+    assert (
+        chain["retrieval"]["status"]
+        == "PASS"
+    )
+
+    assert (
+        chain["retrieval"]["role"]
+        == "ESTABLISHED_UPSTREAM"
+    )
+
+    assert (
+        chain["ranking"]["status"]
+        == "FAIL"
+    )
+
+    assert (
+        chain["ranking"]["role"]
+        == "FIRST_BROKEN"
+    )
+
+    assert (
+        chain["context_selection"][
+            "status"
+        ]
+        == "UNKNOWN"
+    )
+
+
+def test_retrieval_failure_layer_chain_does_not_claim_upstream_passes():
+    item = trace(
+        retrieved=False,
+        answer=False,
+    )
+
+    result = diagnose_rag(
+        case(),
+        item,
+    )
+
+    chain = {
+        entry["layer"]: entry
+        for entry
+        in result["attribution"][
+            "layer_chain"
+        ]
+    }
+
+    assert (
+        chain["retrieval"]["status"]
+        == "FAIL"
+    )
+
+    assert (
+        chain["retrieval"]["role"]
+        == "FIRST_BROKEN"
+    )
+
+    assert (
+        chain["ranking"]["status"]
+        == "UNKNOWN"
+    )
+
+
+def test_postprocessing_chain_establishes_generation_upstream():
+    item = trace()
+
+    item["postprocessing"][
+        "final_answer"
+    ] = "I do not know."
+
+    result = diagnose_rag(
+        case(),
+        item,
+    )
+
+    chain = {
+        entry["layer"]: entry
+        for entry
+        in result["attribution"][
+            "layer_chain"
+        ]
+    }
+
+    assert (
+        result["attribution"][
+            "first_broken_layer"
+        ]
+        == "postprocessing"
+    )
+
+    assert (
+        chain["generation"]["status"]
+        == "PASS"
+    )
+
+    assert (
+        chain["generation"]["role"]
+        == "ESTABLISHED_UPSTREAM"
+    )
+
+    assert (
+        chain["postprocessing"][
+            "status"
+        ]
+        == "FAIL"
+    )
+
+
+def test_console_report_shows_layered_attribution():
+    item = trace()
+
+    item["retrieval"]["candidates"] = [
+        {
+            "chunk_id": "other-1",
+            "source_id": "other-a",
+            "rank": 1,
+            "score": 0.99,
+        },
+        {
+            "chunk_id": "other-2",
+            "source_id": "other-b",
+            "rank": 2,
+            "score": 0.95,
+        },
+        {
+            "chunk_id": "c1",
+            "source_id": "policy",
+            "rank": 3,
+            "score": 0.80,
+        },
+    ]
+
+    item["context_selection"][
+        "selected_chunk_ids"
+    ] = [
+        "other-1",
+        "other-2",
+    ]
+
+    result = diagnose_rag(
+        case(),
+        item,
+    )
+
+    rendered = (
+        rag_module.render_rag_result(
+            result,
+            "console",
+        )
+    )
+
+    assert (
+        "First broken layer: ranking"
+        in rendered
+    )
+
+    assert (
+        "- retrieval: PASS "
+        "(established upstream)"
+        in rendered
+    )
+
+    assert (
+        "- ranking: FAIL  "
+        "<-- FIRST BROKEN"
+        in rendered
+    )

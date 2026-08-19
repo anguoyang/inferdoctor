@@ -769,6 +769,227 @@ def _trace_evidence_summary(
     }
 
 
+
+def _candidate_rank(
+    candidate: Dict[str, Any],
+) -> Optional[int]:
+    value = candidate.get("rank")
+
+    if isinstance(value, bool):
+        return None
+
+    if isinstance(value, int):
+        return value if value > 0 else None
+
+    if isinstance(value, float):
+        integer = int(value)
+        return (
+            integer
+            if value == integer and integer > 0
+            else None
+        )
+
+    return None
+
+
+def _drop_reason_text(
+    value: Any,
+) -> str:
+    if isinstance(value, str):
+        return value.casefold()
+
+    if isinstance(value, list):
+        return " ".join(
+            str(item)
+            for item in value
+        ).casefold()
+
+    if isinstance(value, dict):
+        return " ".join(
+            "{0} {1}".format(key, item)
+            for key, item in value.items()
+        ).casefold()
+
+    return str(value or "").casefold()
+
+
+def _ranking_failure_evidence(
+    source_id: str,
+    candidates: Sequence[Dict[str, Any]],
+    selected_ids: set[str],
+    context_selection: Dict[str, Any],
+) -> Optional[Dict[str, Any]]:
+    source_candidates = [
+        candidate
+        for candidate in candidates
+        if (
+            isinstance(candidate, dict)
+            and str(candidate.get("source_id"))
+            == source_id
+        )
+    ]
+
+    if not source_candidates:
+        return None
+
+    source_chunk_ids = {
+        str(candidate.get("chunk_id"))
+        for candidate in source_candidates
+        if candidate.get("chunk_id")
+    }
+
+    if source_chunk_ids & selected_ids:
+        return None
+
+    ranked_source_candidates = [
+        (
+            str(candidate.get("chunk_id")),
+            _candidate_rank(candidate),
+        )
+        for candidate in source_candidates
+        if (
+            candidate.get("chunk_id")
+            and _candidate_rank(candidate)
+            is not None
+        )
+    ]
+
+    if not ranked_source_candidates:
+        return None
+
+    best_source_rank = min(
+        rank
+        for _, rank in ranked_source_candidates
+        if rank is not None
+    )
+
+    drop_reasons = context_selection.get(
+        "drop_reasons"
+    )
+
+    if isinstance(drop_reasons, dict):
+        for chunk_id, rank in ranked_source_candidates:
+            reason = _drop_reason_text(
+                drop_reasons.get(chunk_id)
+            )
+
+            ranking_tokens = (
+                "rank",
+                "top_k",
+                "top-k",
+                "cutoff",
+                "score threshold",
+                "score_threshold",
+            )
+
+            if any(
+                token in reason
+                for token in ranking_tokens
+            ):
+                return {
+                    "evidence": [
+                        "Required source {0} was retrieved at rank {1} but its chunk {2} was explicitly dropped for a ranking/cutoff reason: {3}".format(
+                            source_id,
+                            rank,
+                            chunk_id,
+                            reason,
+                        )
+                    ],
+                    "evidence_strength": "observed",
+                    "confidence": "high",
+                    "known": [
+                        "The expected source was retrieved.",
+                        "The expected source was not selected into final context.",
+                        "The trace explicitly attributes the drop to ranking or cutoff behavior.",
+                    ],
+                    "best_source_rank": (
+                        best_source_rank
+                    ),
+                    "effective_cutoff": None,
+                    "method": (
+                        "explicit_drop_reason"
+                    ),
+                }
+
+    selected_candidates = [
+        candidate
+        for candidate in candidates
+        if (
+            isinstance(candidate, dict)
+            and candidate.get("chunk_id")
+            and str(
+                candidate.get("chunk_id")
+            )
+            in selected_ids
+        )
+    ]
+
+    if not selected_candidates:
+        return None
+
+    selected_ranks = [
+        _candidate_rank(candidate)
+        for candidate in selected_candidates
+    ]
+
+    if any(
+        rank is None
+        for rank in selected_ranks
+    ):
+        return None
+
+    normalized_ranks = sorted(
+        {
+            int(rank)
+            for rank in selected_ranks
+            if rank is not None
+        }
+    )
+
+    if not normalized_ranks:
+        return None
+
+    expected_prefix = list(
+        range(
+            1,
+            max(normalized_ranks) + 1,
+        )
+    )
+
+    if normalized_ranks != expected_prefix:
+        return None
+
+    cutoff = max(normalized_ranks)
+
+    if best_source_rank <= cutoff:
+        return None
+
+    return {
+        "evidence": [
+            "Required source {0} was retrieved at best rank {1}, while selected context chunks form an observed top-rank prefix ending at rank {2}.".format(
+                source_id,
+                best_source_rank,
+                cutoff,
+            )
+        ],
+        "evidence_strength": (
+            "strongly_indicated"
+        ),
+        "confidence": "medium",
+        "known": [
+            "The expected source was retrieved.",
+            "The selected chunks correspond to the observed top-ranked prefix.",
+            "The best expected-source rank falls below that observed selection cutoff.",
+        ],
+        "best_source_rank": (
+            best_source_rank
+        ),
+        "effective_cutoff": cutoff,
+        "method": (
+            "observed_top_rank_prefix"
+        ),
+    }
+
 def diagnose_rag(
     case: Dict[str, Any],
     trace: Dict[str, Any],
@@ -951,52 +1172,124 @@ def diagnose_rag(
     if retrieved_required_source_ids:
         if not selection_known:
             need(
-                "Selected context chunk IDs were not captured, so context-selection failure cannot be proven."
+                "Selected context chunk IDs were not captured, so ranking-vs-context-selection attribution cannot be proven."
             )
+
         else:
-            for source_id in retrieved_required_source_ids:
+            for source_id in (
+                retrieved_required_source_ids
+            ):
                 source_candidates = [
                     candidate
                     for candidate in candidates
                     if (
-                        isinstance(candidate, dict)
+                        isinstance(
+                            candidate,
+                            dict,
+                        )
                         and str(
-                            candidate.get("source_id")
+                            candidate.get(
+                                "source_id"
+                            )
                         )
                         == source_id
                     )
                 ]
 
                 source_chunk_ids = {
-                    str(candidate.get("chunk_id"))
-                    for candidate in source_candidates
-                    if candidate.get("chunk_id")
+                    str(
+                        candidate.get(
+                            "chunk_id"
+                        )
+                    )
+                    for candidate
+                    in source_candidates
+                    if candidate.get(
+                        "chunk_id"
+                    )
                 }
 
                 if not source_chunk_ids:
                     need(
-                        "A required source was retrieved but its candidate chunk_id was not captured, so context selection cannot be evaluated."
+                        "A required source was retrieved but its candidate chunk_id was not captured, so ranking and context selection cannot be evaluated."
                     )
                     continue
 
-                if source_chunk_ids.isdisjoint(
-                    selected_ids
+                if (
+                    source_chunk_ids
+                    & selected_ids
                 ):
-                    add(
-                        "context_selection_failure",
-                        "fail",
-                        [
-                            "Required source retrieved but not selected into final context: {0}".format(
-                                source_id
-                            )
-                        ],
-                        "observed",
-                        "high",
-                        "Inspect ranking, rerank, context cutoff, and selected_chunk_ids.",
-                        known=[
-                            "The required source exists in retrieval candidates but none of its chunks appear in selected_chunk_ids."
-                        ],
+                    continue
+
+                ranking_evidence = (
+                    _ranking_failure_evidence(
+                        source_id,
+                        candidates,
+                        selected_ids,
+                        context_selection,
                     )
+                )
+
+                if ranking_evidence:
+                    add(
+                        "ranking_failure",
+                        "fail",
+                        ranking_evidence[
+                            "evidence"
+                        ],
+                        ranking_evidence[
+                            "evidence_strength"
+                        ],
+                        ranking_evidence[
+                            "confidence"
+                        ],
+                        "Keep retrieval fixed and test ranking or selection cutoff changes before changing the model or prompt.",
+                        known=(
+                            ranking_evidence[
+                                "known"
+                            ]
+                        ),
+                    )
+
+                    diagnoses[-1][
+                        "ranking_evidence"
+                    ] = {
+                        "method": (
+                            ranking_evidence[
+                                "method"
+                            ]
+                        ),
+                        "best_source_rank": (
+                            ranking_evidence[
+                                "best_source_rank"
+                            ]
+                        ),
+                        "effective_cutoff": (
+                            ranking_evidence[
+                                "effective_cutoff"
+                            ]
+                        ),
+                    }
+
+                    continue
+
+                add(
+                    "context_selection_failure",
+                    "fail",
+                    [
+                        "Required source retrieved but not selected into final context: {0}".format(
+                            source_id
+                        )
+                    ],
+                    "observed",
+                    "high",
+                    "Keep retrieval fixed and inspect context-selection rules, rerank output, filters, context budget, and selected_chunk_ids.",
+                    known=[
+                        "The required source exists in retrieval candidates.",
+                        "None of its captured chunks appear in selected_chunk_ids.",
+                        "Available evidence does not prove that rank or top-k cutoff caused the exclusion.",
+                    ],
+                )
 
     elif required_source_ids and retrieval_known:
         if not any(
@@ -1371,37 +1664,257 @@ RAG_LAYER_NAMES = {
 }
 
 
-def _build_rag_attribution(
-    diagnoses: Sequence[Dict[str, Any]],
-) -> Dict[str, Any]:
-    candidates = []
 
-    for index, diagnosis in enumerate(diagnoses):
+RAG_ATTRIBUTION_LAYER_SEQUENCE = (
+    (
+        "conversation",
+        "conversation_memory_contamination",
+    ),
+    (
+        "retrieval",
+        "retrieval_failure",
+    ),
+    (
+        "ranking",
+        "ranking_failure",
+    ),
+    (
+        "context_selection",
+        "context_selection_failure",
+    ),
+    (
+        "context",
+        "context_truncation",
+    ),
+    (
+        "prompt",
+        "prompt_grounding_failure",
+    ),
+    (
+        "generation",
+        "model_reasoning_limitation",
+    ),
+    (
+        "postprocessing",
+        "answer_postprocessing_failure",
+    ),
+)
+
+
+def _build_layer_chain(
+    diagnoses: Sequence[Dict[str, Any]],
+    first_category: Optional[str],
+) -> List[Dict[str, Any]]:
+    first_order = (
+        RAG_LAYER_ORDER.get(first_category)
+        if first_category
+        else None
+    )
+
+    by_category: Dict[
+        str,
+        Dict[str, Any],
+    ] = {}
+
+    for diagnosis in diagnoses:
         category = str(
             diagnosis.get("category") or ""
         )
-        order = RAG_LAYER_ORDER.get(category)
 
-        if order is None:
-            diagnosis["attribution_role"] = (
-                "evidence_or_summary"
-            )
+        if category not in RAG_LAYER_ORDER:
             continue
 
         if diagnosis.get("status") not in {
             "fail",
             "warn",
         }:
-            diagnosis["attribution_role"] = (
-                "not_broken"
+            continue
+
+        if category not in by_category:
+            by_category[category] = diagnosis
+
+    established_upstream: Dict[
+        str,
+        str,
+    ] = {}
+
+    if first_category == "ranking_failure":
+        established_upstream["retrieval"] = (
+            "Required source was present in "
+            "retrieval candidates."
+        )
+
+    elif (
+        first_category
+        == "context_selection_failure"
+    ):
+        established_upstream["retrieval"] = (
+            "Required source was present in "
+            "retrieval candidates."
+        )
+
+    elif (
+        first_category
+        == "prompt_grounding_failure"
+    ):
+        established_upstream["context"] = (
+            "Required facts were observed in "
+            "the final context."
+        )
+
+    elif (
+        first_category
+        == "model_reasoning_limitation"
+    ):
+        established_upstream["context"] = (
+            "Required facts were observed in "
+            "the supplied context."
+        )
+        established_upstream["prompt"] = (
+            "Prompt grounding was established "
+            "before generation attribution."
+        )
+
+    elif (
+        first_category
+        == "answer_postprocessing_failure"
+    ):
+        established_upstream["generation"] = (
+            "The raw model answer contained "
+            "more required facts than the final "
+            "postprocessed answer."
+        )
+
+    chain: List[Dict[str, Any]] = []
+
+    for layer, category in (
+        RAG_ATTRIBUTION_LAYER_SEQUENCE
+    ):
+        diagnosis = by_category.get(
+            category
+        )
+
+        if diagnosis is not None:
+            order = RAG_LAYER_ORDER[
+                category
+            ]
+
+            if category == first_category:
+                role = "FIRST_BROKEN"
+
+            elif (
+                first_order is not None
+                and order > first_order
+            ):
+                role = (
+                    "DOWNSTREAM_OBSERVATION"
+                )
+
+            else:
+                role = (
+                    "INDEPENDENT_OBSERVATION"
+                )
+
+            evidence = (
+                diagnosis.get("evidence")
+                or []
             )
+
+            chain.append({
+                "layer": layer,
+                "status": str(
+                    diagnosis.get(
+                        "status",
+                        "warn",
+                    )
+                ).upper(),
+                "role": role,
+                "category": category,
+                "confidence": (
+                    diagnosis.get(
+                        "confidence",
+                        "unknown",
+                    )
+                ),
+                "evidence": (
+                    evidence[0]
+                    if evidence
+                    else ""
+                ),
+            })
+
+            continue
+
+        if layer in established_upstream:
+            chain.append({
+                "layer": layer,
+                "status": "PASS",
+                "role": (
+                    "ESTABLISHED_UPSTREAM"
+                ),
+                "category": None,
+                "confidence": "high",
+                "evidence": (
+                    established_upstream[
+                        layer
+                    ]
+                ),
+            })
+
+            continue
+
+        chain.append({
+            "layer": layer,
+            "status": "UNKNOWN",
+            "role": "NOT_ATTRIBUTED",
+            "category": None,
+            "confidence": "unknown",
+            "evidence": (
+                "No supported conclusion for "
+                "this layer from the available "
+                "evidence."
+            ),
+        })
+
+    return chain
+
+
+def _build_rag_attribution(
+    diagnoses: Sequence[Dict[str, Any]],
+) -> Dict[str, Any]:
+    candidates = []
+
+    for index, diagnosis in enumerate(
+        diagnoses
+    ):
+        category = str(
+            diagnosis.get("category") or ""
+        )
+        order = RAG_LAYER_ORDER.get(
+            category
+        )
+
+        if order is None:
+            diagnosis[
+                "attribution_role"
+            ] = "evidence_or_summary"
+            continue
+
+        if diagnosis.get("status") not in {
+            "fail",
+            "warn",
+        }:
+            diagnosis[
+                "attribution_role"
+            ] = "not_broken"
             continue
 
         candidates.append(
             (
                 order,
                 0
-                if diagnosis.get("status") == "fail"
+                if diagnosis.get("status")
+                == "fail"
                 else 1,
                 index,
                 diagnosis,
@@ -1415,9 +1928,16 @@ def _build_rag_attribution(
             "first_broken_status": None,
             "confidence": "unknown",
             "downstream_observations": [],
+            "layer_chain": (
+                _build_layer_chain(
+                    diagnoses,
+                    None,
+                )
+            ),
             "causal_claim": (
-                "No broken layer was established "
-                "from the available evidence."
+                "No broken layer was "
+                "established from the "
+                "available evidence."
             ),
         }
 
@@ -1429,29 +1949,45 @@ def _build_rag_attribution(
         )
     )
 
-    first_order, _, _, first = candidates[0]
-    first_category = str(first["category"])
+    first_order, _, _, first = (
+        candidates[0]
+    )
+
+    first_category = str(
+        first["category"]
+    )
 
     downstream = []
 
-    for order, _, _, diagnosis in candidates:
+    for (
+        order,
+        _,
+        _,
+        diagnosis,
+    ) in candidates:
         category = str(
             diagnosis.get("category") or ""
         )
 
         if diagnosis is first:
-            diagnosis["attribution_role"] = (
-                "first_broken_layer"
-            )
+            diagnosis[
+                "attribution_role"
+            ] = "first_broken_layer"
             continue
 
         if order > first_order:
-            diagnosis["attribution_role"] = (
-                "downstream_observation"
+            diagnosis[
+                "attribution_role"
+            ] = "downstream_observation"
+
+            downstream.append(
+                category
             )
-            downstream.append(category)
+
         else:
-            diagnosis["attribution_role"] = (
+            diagnosis[
+                "attribution_role"
+            ] = (
                 "same_or_independent_layer"
             )
 
@@ -1466,25 +2002,37 @@ def _build_rag_attribution(
                 first_category,
             )
         ),
-        "first_broken_category": first_category,
-        "first_broken_status": first.get(
-            "status"
+        "first_broken_category": (
+            first_category
+        ),
+        "first_broken_status": (
+            first.get("status")
         ),
         "confidence": first.get(
             "confidence",
             "unknown",
         ),
-        "downstream_observations": list(
-            dict.fromkeys(downstream)
+        "downstream_observations": (
+            list(
+                dict.fromkeys(
+                    downstream
+                )
+            )
+        ),
+        "layer_chain": (
+            _build_layer_chain(
+                diagnoses,
+                first_category,
+            )
         ),
         "causal_claim": (
-            "This is the earliest supported broken "
-            "layer in pipeline order. Later findings "
-            "are downstream observations; causation "
-            "is not assumed unless separately proven."
+            "This is the earliest supported "
+            "broken layer in pipeline order. "
+            "Later findings are downstream "
+            "observations; causation is not "
+            "assumed unless separately proven."
         ),
     }
-
 
 def _apply_rag_attribution(
     result: Dict[str, Any],
@@ -2080,6 +2628,79 @@ def _render_console(result: Dict[str, Any]) -> str:
     for key in ("status", "overall_status", "transport_status", "evaluation_status", "review_status", "required_facts_matched", "required_facts_total", "forbidden_claims_matched", "forbidden_claims_total", "verdict", "case_count", "case_id", "trace_id"):
         if result.get(key) is not None:
             lines.append(f"{key}: {result.get(key)}")
+    attribution = result.get(
+        "attribution"
+    )
+
+    if isinstance(
+        attribution,
+        dict,
+    ):
+        lines.append("")
+        lines.append("Attribution:")
+
+        first_layer = attribution.get(
+            "first_broken_layer"
+        )
+
+        lines.append(
+            "First broken layer: {0}".format(
+                first_layer
+                or "not established"
+            )
+        )
+
+        chain = attribution.get(
+            "layer_chain"
+        )
+
+        if isinstance(chain, list):
+            for item in chain:
+                if not isinstance(
+                    item,
+                    dict,
+                ):
+                    continue
+
+                role = str(
+                    item.get("role")
+                    or ""
+                )
+
+                marker = (
+                    "  <-- FIRST BROKEN"
+                    if role
+                    == "FIRST_BROKEN"
+                    else ""
+                )
+
+                role_note = ""
+
+                if (
+                    role
+                    == "DOWNSTREAM_OBSERVATION"
+                ):
+                    role_note = (
+                        " (downstream observation)"
+                    )
+
+                elif (
+                    role
+                    == "ESTABLISHED_UPSTREAM"
+                ):
+                    role_note = (
+                        " (established upstream)"
+                    )
+
+                lines.append(
+                    "- {0}: {1}{2}{3}".format(
+                        item.get("layer"),
+                        item.get("status"),
+                        role_note,
+                        marker,
+                    )
+                )
+
     if result.get("findings"):
         lines.append("")
         for item in result["findings"][:20]:
