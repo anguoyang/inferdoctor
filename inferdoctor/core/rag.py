@@ -280,130 +280,515 @@ def _match_term_details(text: str, terms: Sequence[str], mode: str) -> tuple[Opt
 def _terms_match(text: str, terms: Sequence[str], mode: str) -> Optional[bool]:
     return _match_term_details(text, terms, mode)[0]
 
-def _candidate_source_ids(trace: Dict[str, Any]) -> set[str]:
-    return {str(candidate.get("source_id")) for candidate in trace.get("retrieval", {}).get("candidates", []) if isinstance(candidate, dict) and candidate.get("source_id")}
+
+def _section_dict(
+    trace: Dict[str, Any],
+    name: str,
+) -> Dict[str, Any]:
+    value = trace.get(name)
+    return value if isinstance(value, dict) else {}
 
 
-def _selected_candidate_ids(trace: Dict[str, Any]) -> set[str]:
-    selected = trace.get("context_selection", {}).get("selected_chunk_ids", [])
-    return {str(item) for item in selected if item is not None}
+def _list_field_known(
+    trace: Dict[str, Any],
+    section: str,
+    key: str,
+) -> bool:
+    return isinstance(
+        _section_dict(trace, section).get(key),
+        list,
+    )
 
 
-def _candidate_by_chunk(trace: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
-    return {str(candidate.get("chunk_id")): candidate for candidate in trace.get("retrieval", {}).get("candidates", []) if isinstance(candidate, dict) and candidate.get("chunk_id")}
+def _text_field_state(
+    trace: Dict[str, Any],
+    section: str,
+    text_key: str,
+    hash_key: str,
+) -> str:
+    data = _section_dict(trace, section)
+
+    if (
+        text_key in data
+        and isinstance(data.get(text_key), str)
+    ):
+        return "available"
+
+    if (
+        isinstance(data.get(hash_key), str)
+        and bool(data.get(hash_key))
+    ):
+        return "redacted"
+
+    return "missing"
+
+
+def _candidate_source_ids(
+    trace: Dict[str, Any],
+) -> set[str]:
+    candidates = _section_dict(
+        trace,
+        "retrieval",
+    ).get("candidates", [])
+
+    if not isinstance(candidates, list):
+        return set()
+
+    return {
+        str(candidate.get("source_id"))
+        for candidate in candidates
+        if (
+            isinstance(candidate, dict)
+            and candidate.get("source_id")
+        )
+    }
+
+
+def _selected_candidate_ids(
+    trace: Dict[str, Any],
+) -> set[str]:
+    selected = _section_dict(
+        trace,
+        "context_selection",
+    ).get("selected_chunk_ids", [])
+
+    if not isinstance(selected, list):
+        return set()
+
+    return {
+        str(item)
+        for item in selected
+        if item is not None
+    }
+
+
+def _candidate_by_chunk(
+    trace: Dict[str, Any],
+) -> Dict[str, Dict[str, Any]]:
+    candidates = _section_dict(
+        trace,
+        "retrieval",
+    ).get("candidates", [])
+
+    if not isinstance(candidates, list):
+        return {}
+
+    return {
+        str(candidate.get("chunk_id")): candidate
+        for candidate in candidates
+        if (
+            isinstance(candidate, dict)
+            and candidate.get("chunk_id")
+        )
+    }
 
 
 def _context_text(trace: Dict[str, Any]) -> str:
-    return str(trace.get("context_selection", {}).get("context_text") or "")
+    return str(
+        _section_dict(
+            trace,
+            "context_selection",
+        ).get("context_text")
+        or ""
+    )
 
 
 def _raw_answer(trace: Dict[str, Any]) -> str:
-    return str(trace.get("generation", {}).get("raw_answer") or "")
+    return str(
+        _section_dict(
+            trace,
+            "generation",
+        ).get("raw_answer")
+        or ""
+    )
 
 
 def _final_answer(trace: Dict[str, Any]) -> str:
-    return str(trace.get("postprocessing", {}).get("final_answer") or "")
+    return str(
+        _section_dict(
+            trace,
+            "postprocessing",
+        ).get("final_answer")
+        or ""
+    )
 
 
-def _required_fact_coverage(case: Dict[str, Any], text: str) -> Dict[str, Any]:
+def _required_fact_coverage(
+    case: Dict[str, Any],
+    text: str,
+) -> Dict[str, Any]:
     results = []
     deterministic = 0
     matched = 0
     human_review = 0
+
     for fact in case.get("required_facts", []) or []:
         if not isinstance(fact, dict):
             continue
-        mode = fact.get("match_mode", "human_review")
+
+        mode = fact.get(
+            "match_mode",
+            "human_review",
+        )
         terms = fact.get("match_terms", [])
-        outcome, matched_terms, missing_terms = _match_term_details(text, terms, mode)
+
+        outcome, matched_terms, missing_terms = (
+            _match_term_details(
+                text,
+                terms,
+                mode,
+            )
+        )
+
         if outcome is None:
             human_review += 1
+            evaluation_state = "human_review"
         else:
             deterministic += 1
             matched += 1 if outcome else 0
+            evaluation_state = "evaluated"
+
         results.append({
             "fact_id": fact.get("fact_id"),
             "match_mode": mode,
             "matched": outcome,
             "matched_terms": matched_terms,
             "missing_terms": missing_terms,
+            "evaluation_state": evaluation_state,
         })
+
     total = deterministic + human_review
+
     return {
         "matched": matched,
         "deterministic": deterministic,
         "human_review": human_review,
         "total": total,
         "deterministic_matched": matched,
-        "deterministic_failed": max(0, deterministic - matched),
-        "human_review_required": human_review > 0,
+        "deterministic_failed": max(
+            0,
+            deterministic - matched,
+        ),
+        "human_review_required": (
+            human_review > 0
+        ),
+        "evaluable": True,
+        "evidence_state": "available",
         "results": results,
     }
 
 
-def _forbidden_claims(case: Dict[str, Any], text: str) -> Dict[str, Any]:
+def _unevaluable_required_fact_coverage(
+    case: Dict[str, Any],
+    evidence_state: str,
+) -> Dict[str, Any]:
+    results = []
+    deterministic = 0
+    human_review = 0
+
+    for fact in case.get("required_facts", []) or []:
+        if not isinstance(fact, dict):
+            continue
+
+        mode = fact.get(
+            "match_mode",
+            "human_review",
+        )
+
+        if mode == "human_review":
+            human_review += 1
+            state = "human_review"
+        else:
+            deterministic += 1
+            state = evidence_state
+
+        results.append({
+            "fact_id": fact.get("fact_id"),
+            "match_mode": mode,
+            "matched": None,
+            "matched_terms": [],
+            "missing_terms": [],
+            "evaluation_state": state,
+        })
+
+    return {
+        "matched": 0,
+        "deterministic": deterministic,
+        "human_review": human_review,
+        "total": deterministic + human_review,
+        "deterministic_matched": 0,
+        "deterministic_failed": 0,
+        "human_review_required": (
+            human_review > 0
+        ),
+        "evaluable": False,
+        "evidence_state": evidence_state,
+        "results": results,
+    }
+
+
+def _forbidden_claims(
+    case: Dict[str, Any],
+    text: str,
+) -> Dict[str, Any]:
     hits = []
     results = []
     deterministic = 0
     human_review = 0
-    for claim in case.get("forbidden_claims", []) or []:
+
+    for claim in case.get(
+        "forbidden_claims",
+        [],
+    ) or []:
         if not isinstance(claim, dict):
             continue
-        mode = claim.get("match_mode", "human_review")
-        outcome, matched_terms, missing_terms = _match_term_details(text, claim.get("match_terms", []), mode)
+
+        mode = claim.get(
+            "match_mode",
+            "human_review",
+        )
+
+        outcome, matched_terms, missing_terms = (
+            _match_term_details(
+                text,
+                claim.get("match_terms", []),
+                mode,
+            )
+        )
+
         if outcome is None:
             human_review += 1
+            evaluation_state = "human_review"
         else:
             deterministic += 1
+            evaluation_state = "evaluated"
+
             if outcome:
-                hits.append(claim.get("claim_id"))
+                hits.append(
+                    claim.get("claim_id")
+                )
+
         results.append({
             "claim_id": claim.get("claim_id"),
             "match_mode": mode,
             "matched": outcome,
             "matched_terms": matched_terms,
             "missing_terms": missing_terms,
+            "evaluation_state": evaluation_state,
         })
+
     return {
         "hits": hits,
         "matched": len(hits),
         "deterministic": deterministic,
         "human_review": human_review,
         "total": deterministic + human_review,
-        "human_review_required": human_review > 0,
+        "human_review_required": (
+            human_review > 0
+        ),
+        "evaluable": True,
+        "evidence_state": "available",
         "results": results,
     }
 
 
-def _trace_evidence_summary(trace: Dict[str, Any]) -> Dict[str, Any]:
-    checks = {
-        "question_text_or_hash": bool(trace.get("input", {}).get("original_question") or trace.get("input", {}).get("original_question_sha256")),
-        "retrieval_candidates": bool(trace.get("retrieval", {}).get("candidates")),
-        "retrieval_latency": trace.get("retrieval", {}).get("latency_ms") is not None,
-        "rerank_status": bool(trace.get("rerank", {}).get("status")) if isinstance(trace.get("rerank"), dict) else False,
-        "context_text_or_hash": bool(trace.get("context_selection", {}).get("context_text") or trace.get("context_selection", {}).get("context_sha256")),
-        "context_budget": trace.get("context_selection", {}).get("context_budget") is not None,
-        "prompt_hash": bool(trace.get("prompt", {}).get("prompt_sha256")),
-        "grounding_signal": trace.get("prompt", {}).get("grounding_instruction_present") is not None,
-        "raw_answer_hash_or_text": bool(trace.get("generation", {}).get("raw_answer") or trace.get("generation", {}).get("raw_answer_sha256")),
-        "final_answer_hash_or_text": bool(trace.get("postprocessing", {}).get("final_answer") or trace.get("postprocessing", {}).get("final_answer_sha256")),
-        "ttft": trace.get("generation", {}).get("ttft_ms") is not None,
-        "token_usage": bool(trace.get("generation", {}).get("token_usage")),
-        "conversation_metadata": trace.get("conversation", {}).get("history_included") is not None,
-        "stage_events": bool(trace.get("stage_events")),
-    }
+def _unevaluable_forbidden_claims(
+    case: Dict[str, Any],
+    evidence_state: str,
+) -> Dict[str, Any]:
+    results = []
+    deterministic = 0
+    human_review = 0
+
+    for claim in case.get(
+        "forbidden_claims",
+        [],
+    ) or []:
+        if not isinstance(claim, dict):
+            continue
+
+        mode = claim.get(
+            "match_mode",
+            "human_review",
+        )
+
+        if mode == "human_review":
+            human_review += 1
+            state = "human_review"
+        else:
+            deterministic += 1
+            state = evidence_state
+
+        results.append({
+            "claim_id": claim.get("claim_id"),
+            "match_mode": mode,
+            "matched": None,
+            "matched_terms": [],
+            "missing_terms": [],
+            "evaluation_state": state,
+        })
+
     return {
-        "available": [key for key, value in checks.items() if value],
-        "missing_or_redacted": [key for key, value in checks.items() if not value],
+        "hits": [],
+        "matched": 0,
+        "deterministic": deterministic,
+        "human_review": human_review,
+        "total": deterministic + human_review,
+        "human_review_required": (
+            human_review > 0
+        ),
+        "evaluable": False,
+        "evidence_state": evidence_state,
+        "results": results,
     }
 
 
-def diagnose_rag(case: Dict[str, Any], trace: Dict[str, Any]) -> Dict[str, Any]:
+def _trace_evidence_summary(
+    trace: Dict[str, Any],
+) -> Dict[str, Any]:
+    input_data = _section_dict(
+        trace,
+        "input",
+    )
+    retrieval = _section_dict(
+        trace,
+        "retrieval",
+    )
+    rerank = _section_dict(
+        trace,
+        "rerank",
+    )
+    context = _section_dict(
+        trace,
+        "context_selection",
+    )
+    prompt = _section_dict(
+        trace,
+        "prompt",
+    )
+    generation = _section_dict(
+        trace,
+        "generation",
+    )
+    postprocessing = _section_dict(
+        trace,
+        "postprocessing",
+    )
+    conversation = _section_dict(
+        trace,
+        "conversation",
+    )
+
+    checks = {
+        "question_text_or_hash": bool(
+            input_data.get("original_question")
+            or input_data.get(
+                "original_question_sha256"
+            )
+        ),
+        "retrieval_candidates": isinstance(
+            retrieval.get("candidates"),
+            list,
+        ),
+        "retrieval_latency": (
+            retrieval.get("latency_ms")
+            is not None
+        ),
+        "rerank_status": bool(
+            rerank.get("status")
+        ),
+        "context_text_or_hash": (
+            _text_field_state(
+                trace,
+                "context_selection",
+                "context_text",
+                "context_sha256",
+            )
+            != "missing"
+        ),
+        "context_budget": (
+            context.get("context_budget")
+            is not None
+        ),
+        "prompt_hash": bool(
+            prompt.get("prompt_sha256")
+        ),
+        "grounding_signal": (
+            prompt.get(
+                "grounding_instruction_present"
+            )
+            is not None
+        ),
+        "raw_answer_hash_or_text": (
+            _text_field_state(
+                trace,
+                "generation",
+                "raw_answer",
+                "raw_answer_sha256",
+            )
+            != "missing"
+        ),
+        "final_answer_hash_or_text": (
+            _text_field_state(
+                trace,
+                "postprocessing",
+                "final_answer",
+                "final_answer_sha256",
+            )
+            != "missing"
+        ),
+        "ttft": (
+            generation.get("ttft_ms")
+            is not None
+        ),
+        "token_usage": bool(
+            generation.get("token_usage")
+        ),
+        "conversation_metadata": (
+            conversation.get(
+                "history_included"
+            )
+            is not None
+        ),
+        "stage_events": bool(
+            trace.get("stage_events")
+        ),
+    }
+
+    return {
+        "available": [
+            key
+            for key, value in checks.items()
+            if value
+        ],
+        "missing_or_redacted": [
+            key
+            for key, value in checks.items()
+            if not value
+        ],
+    }
+
+
+def diagnose_rag(
+    case: Dict[str, Any],
+    trace: Dict[str, Any],
+) -> Dict[str, Any]:
     case_findings = validate_case_object(case)
     trace_findings = validate_trace_object(trace)
-    diagnoses: List[Dict[str, Any]] = []
 
-    def add(category: str, status: str, evidence: Sequence[str], strength: str, confidence: str, next_experiment: str, known: Sequence[str] = (), unknown: Sequence[str] = ()) -> None:
+    diagnoses: List[Dict[str, Any]] = []
+    missing_evidence: List[str] = []
+
+    def add(
+        category: str,
+        status: str,
+        evidence: Sequence[str],
+        strength: str,
+        confidence: str,
+        next_experiment: str,
+        known: Sequence[str] = (),
+        unknown: Sequence[str] = (),
+    ) -> None:
         diagnoses.append({
             "category": category,
             "status": status,
@@ -414,92 +799,1089 @@ def diagnose_rag(case: Dict[str, Any], trace: Dict[str, Any]) -> Dict[str, Any]:
             "what_is_not_known": list(unknown),
             "downstream_effects": [],
             "next_experiment": next_experiment,
-            "unsafe_conclusions_to_avoid": ["Do not call the model stupid before isolating retrieval, context, prompt, and post-processing evidence."],
+            "unsafe_conclusions_to_avoid": [
+                "Do not blame the model before retrieval, ranking, context, prompt, and post-processing evidence are isolated."
+            ],
         })
 
-    if any(item["status"] == "FAIL" for item in case_findings + trace_findings):
-        add("insufficient_evidence", "warn", [item["message"] for item in case_findings + trace_findings if item["status"] == "FAIL"], "observed", "high", "Fix the Case/Trace schema errors and rerun diagnosis.")
-    source_ids = _candidate_source_ids(trace)
+    def need(message: str) -> None:
+        if message not in missing_evidence:
+            missing_evidence.append(message)
+
+    schema_failures = [
+        item["message"]
+        for item in case_findings + trace_findings
+        if item["status"] == "FAIL"
+    ]
+
+    if schema_failures:
+        add(
+            "insufficient_evidence",
+            "warn",
+            schema_failures,
+            "observed",
+            "high",
+            "Fix the Case/Trace schema errors and rerun diagnosis.",
+        )
+
+    retrieval = _section_dict(
+        trace,
+        "retrieval",
+    )
+    context_selection = _section_dict(
+        trace,
+        "context_selection",
+    )
+    prompt = _section_dict(
+        trace,
+        "prompt",
+    )
+    conversation = _section_dict(
+        trace,
+        "conversation",
+    )
+
+    retrieval_known = _list_field_known(
+        trace,
+        "retrieval",
+        "candidates",
+    )
+    selection_known = _list_field_known(
+        trace,
+        "context_selection",
+        "selected_chunk_ids",
+    )
+
+    candidates = (
+        retrieval.get("candidates", [])
+        if retrieval_known
+        else []
+    )
+
     selected_ids = _selected_candidate_ids(trace)
-    by_chunk = _candidate_by_chunk(trace)
-    selected_sources = {str(by_chunk[chunk].get("source_id")) for chunk in selected_ids if chunk in by_chunk}
-    required_sources = [source for source in case.get("expected_sources", []) or [] if isinstance(source, dict) and source.get("required", True)]
-    missing_sources = [str(source.get("source_id")) for source in required_sources if source.get("source_id") not in source_ids]
-    if missing_sources:
-        add("retrieval_failure", "fail", [f"Required source not retrieved: {source_id}" for source_id in missing_sources], "observed", "high", "Probe retrieval with the exact expected source terms and inspect indexing/source availability.", known=["Expected source was absent from retrieval candidates."])
-    not_selected = [str(source.get("source_id")) for source in required_sources if source.get("source_id") in source_ids and source.get("source_id") not in selected_sources]
-    if not_selected:
-        add("context_selection_failure", "fail", [f"Required source retrieved but not selected into final context: {source_id}" for source_id in not_selected], "observed", "high", "Inspect ranking, rerank, context cutoff, and selected_chunk_ids.")
-    context = _context_text(trace)
-    context_coverage = _required_fact_coverage(case, context)
-    final_coverage = _required_fact_coverage(case, _final_answer(trace) or _raw_answer(trace))
-    if trace.get("context_selection", {}).get("truncated") and context_coverage["deterministic"] and context_coverage["matched"] < context_coverage["deterministic"]:
-        add("context_truncation", "fail", ["Context was marked truncated and required facts were absent from final context."], "observed", "medium", "Run the same case with larger context budget or inspect truncation_detail.", unknown=["Whether the missing fact was present before truncation unless dropped chunks retain content or hashes."])
-    prompt = trace.get("prompt", {}) if isinstance(trace.get("prompt"), dict) else {}
-    if context and context_coverage["matched"] == context_coverage["deterministic"] and final_coverage["deterministic"] and final_coverage["matched"] < final_coverage["deterministic"]:
-        if prompt.get("grounding_instruction_present") is False:
-            add("prompt_grounding_failure", "warn", ["Correct evidence appears in context but grounding instruction is absent."], "strongly_indicated", "medium", "Run a Gold Context Probe with an explicit grounding prompt.")
+    source_ids = _candidate_source_ids(trace)
+
+    required_sources = [
+        source
+        for source in case.get(
+            "expected_sources",
+            [],
+        ) or []
+        if (
+            isinstance(source, dict)
+            and source.get("required", True)
+            and source.get("source_id")
+        )
+    ]
+
+    required_source_ids = [
+        str(source["source_id"])
+        for source in required_sources
+    ]
+
+    if not retrieval_known:
+        need(
+            "Retrieval candidates were not captured, so the retrieval and ranking layers cannot be evaluated."
+        )
+
+    elif required_source_ids:
+        if not candidates:
+            add(
+                "retrieval_failure",
+                "fail",
+                [
+                    "Required source not retrieved: {0}".format(
+                        source_id
+                    )
+                    for source_id in required_source_ids
+                ],
+                "observed",
+                "high",
+                "Probe retrieval with the expected source terms and inspect indexing or source availability.",
+                known=[
+                    "The captured retrieval candidate list is explicitly empty."
+                ],
+            )
+
         else:
-            add("insufficient_evidence", "warn", ["Correct evidence appears in context but answer omits required facts."], "possible", "medium", "Run Gold Context Probe before blaming model reasoning.")
+            candidates_without_source_id = [
+                candidate
+                for candidate in candidates
+                if (
+                    isinstance(candidate, dict)
+                    and not candidate.get("source_id")
+                )
+            ]
+
+            missing_sources = [
+                source_id
+                for source_id in required_source_ids
+                if source_id not in source_ids
+            ]
+
+            if missing_sources:
+                if candidates_without_source_id:
+                    need(
+                        "Some retrieval candidates do not contain source_id, so absence of the expected source cannot be proven."
+                    )
+                else:
+                    add(
+                        "retrieval_failure",
+                        "fail",
+                        [
+                            "Required source not retrieved: {0}".format(
+                                source_id
+                            )
+                            for source_id in missing_sources
+                        ],
+                        "observed",
+                        "high",
+                        "Probe retrieval with the expected source terms and inspect indexing or source availability.",
+                        known=[
+                            "The expected source was absent from the captured retrieval candidates."
+                        ],
+                    )
+
+    retrieved_required_source_ids = [
+        source_id
+        for source_id in required_source_ids
+        if source_id in source_ids
+    ]
+
+    if retrieved_required_source_ids:
+        if not selection_known:
+            need(
+                "Selected context chunk IDs were not captured, so context-selection failure cannot be proven."
+            )
+        else:
+            for source_id in retrieved_required_source_ids:
+                source_candidates = [
+                    candidate
+                    for candidate in candidates
+                    if (
+                        isinstance(candidate, dict)
+                        and str(
+                            candidate.get("source_id")
+                        )
+                        == source_id
+                    )
+                ]
+
+                source_chunk_ids = {
+                    str(candidate.get("chunk_id"))
+                    for candidate in source_candidates
+                    if candidate.get("chunk_id")
+                }
+
+                if not source_chunk_ids:
+                    need(
+                        "A required source was retrieved but its candidate chunk_id was not captured, so context selection cannot be evaluated."
+                    )
+                    continue
+
+                if source_chunk_ids.isdisjoint(
+                    selected_ids
+                ):
+                    add(
+                        "context_selection_failure",
+                        "fail",
+                        [
+                            "Required source retrieved but not selected into final context: {0}".format(
+                                source_id
+                            )
+                        ],
+                        "observed",
+                        "high",
+                        "Inspect ranking, rerank, context cutoff, and selected_chunk_ids.",
+                        known=[
+                            "The required source exists in retrieval candidates but none of its chunks appear in selected_chunk_ids."
+                        ],
+                    )
+
+    elif required_source_ids and retrieval_known:
+        if not any(
+            diagnosis["category"]
+            == "retrieval_failure"
+            for diagnosis in diagnoses
+        ):
+            need(
+                "No required source could be positively matched to a captured retrieval candidate."
+            )
+
+    if not selection_known:
+        need(
+            "selected_chunk_ids were not captured, so the context-selection layer is not fully observable."
+        )
+
+    context_state = _text_field_state(
+        trace,
+        "context_selection",
+        "context_text",
+        "context_sha256",
+    )
+    raw_state = _text_field_state(
+        trace,
+        "generation",
+        "raw_answer",
+        "raw_answer_sha256",
+    )
+    final_state = _text_field_state(
+        trace,
+        "postprocessing",
+        "final_answer",
+        "final_answer_sha256",
+    )
+
+    context = _context_text(trace)
     raw = _raw_answer(trace)
     final = _final_answer(trace)
-    raw_cov = _required_fact_coverage(case, raw)
-    final_cov = _required_fact_coverage(case, final)
-    if raw and final and raw_cov["matched"] > final_cov["matched"]:
-        add("answer_postprocessing_failure", "fail", ["Raw answer covered more required facts than final answer."], "observed", "high", "Inspect postprocessing transformations and answer assembly.")
-    conversation = trace.get("conversation", {}) if isinstance(trace.get("conversation"), dict) else {}
-    if conversation.get("history_included") and conversation.get("possible_contamination_signals"):
-        add("conversation_memory_contamination", "warn", ["Conversation history was included and contamination signals were reported."], "possible", "medium", "Replay the same question as a single-turn trace.")
+
+    if context_state == "available":
+        context_coverage = _required_fact_coverage(
+            case,
+            context,
+        )
+    else:
+        context_coverage = (
+            _unevaluable_required_fact_coverage(
+                case,
+                context_state,
+            )
+        )
+
+    if raw_state == "available":
+        raw_coverage = _required_fact_coverage(
+            case,
+            raw,
+        )
+    else:
+        raw_coverage = (
+            _unevaluable_required_fact_coverage(
+                case,
+                raw_state,
+            )
+        )
+
+    if final_state == "available":
+        final_coverage = _required_fact_coverage(
+            case,
+            final,
+        )
+        forbidden = _forbidden_claims(
+            case,
+            final,
+        )
+    else:
+        final_coverage = (
+            _unevaluable_required_fact_coverage(
+                case,
+                final_state,
+            )
+        )
+        forbidden = (
+            _unevaluable_forbidden_claims(
+                case,
+                final_state,
+            )
+        )
+
+    if case.get("required_facts"):
+        if context_state != "available":
+            need(
+                "Final context text is {0}; required-fact coverage in context cannot be evaluated.".format(
+                    context_state
+                )
+            )
+
+        if raw_state != "available":
+            need(
+                "Raw model answer is {0}; generation-layer fact coverage cannot be evaluated.".format(
+                    raw_state
+                )
+            )
+
+        if final_state != "available":
+            need(
+                "Final answer text is {0}; final-answer fact coverage cannot be evaluated.".format(
+                    final_state
+                )
+            )
+
+    if (
+        context_selection.get("truncated")
+        and context_coverage["evaluable"]
+        and context_coverage["deterministic"]
+        and (
+            context_coverage["matched"]
+            < context_coverage["deterministic"]
+        )
+    ):
+        add(
+            "context_truncation",
+            "fail",
+            [
+                "Context was marked truncated and required facts were absent from final context."
+            ],
+            "observed",
+            "medium",
+            "Run the same case with a larger context budget or inspect truncation_detail.",
+            unknown=[
+                "Whether the missing fact existed before truncation unless dropped chunks retain safe evidence."
+            ],
+        )
+
+    if (
+        context_coverage["evaluable"]
+        and final_coverage["evaluable"]
+        and context_coverage["deterministic"]
+        and final_coverage["deterministic"]
+        and (
+            context_coverage["matched"]
+            == context_coverage["deterministic"]
+        )
+        and (
+            final_coverage["matched"]
+            < final_coverage["deterministic"]
+        )
+    ):
+        grounding_signal = prompt.get(
+            "grounding_instruction_present"
+        )
+
+        if grounding_signal is False:
+            add(
+                "prompt_grounding_failure",
+                "warn",
+                [
+                    "Correct evidence appears in context but the grounding instruction is absent."
+                ],
+                "strongly_indicated",
+                "medium",
+                "Run a Gold Context Probe with an explicit grounding instruction.",
+                known=[
+                    "Required facts are present in the final context."
+                ],
+            )
+
+        elif grounding_signal is True:
+            add(
+                "insufficient_evidence",
+                "warn",
+                [
+                    "Correct evidence appears in context but the final answer omits required facts."
+                ],
+                "possible",
+                "medium",
+                "Run Gold Context Probe before attributing the problem to model capability.",
+                known=[
+                    "Required facts are present in context.",
+                    "Grounding instruction was reported as present.",
+                ],
+                unknown=[
+                    "Whether the model can use the same evidence when retrieval and context construction are removed from the path."
+                ],
+            )
+
+        else:
+            need(
+                "Prompt grounding metadata was not captured, so prompt-vs-model responsibility cannot be isolated."
+            )
+
+    if (
+        raw_coverage["evaluable"]
+        and final_coverage["evaluable"]
+        and (
+            raw_coverage["matched"]
+            > final_coverage["matched"]
+        )
+    ):
+        add(
+            "answer_postprocessing_failure",
+            "fail",
+            [
+                "Raw answer covered more required facts than the final answer."
+            ],
+            "observed",
+            "high",
+            "Inspect postprocessing transformations and final answer assembly.",
+            known=[
+                "Required-fact coverage decreased after generation."
+            ],
+        )
+
+    if (
+        conversation.get("history_included")
+        and conversation.get(
+            "possible_contamination_signals"
+        )
+    ):
+        add(
+            "conversation_memory_contamination",
+            "warn",
+            [
+                "Conversation history was included and contamination signals were reported."
+            ],
+            "possible",
+            "medium",
+            "Replay the same question as a clean single-turn trace.",
+        )
+
+    if case.get("forbidden_claims"):
+        if not forbidden["evaluable"]:
+            need(
+                "Final answer text is {0}; forbidden-claim checks cannot be evaluated.".format(
+                    final_state
+                )
+            )
+
+        if forbidden["human_review_required"]:
+            need(
+                "At least one forbidden-claim rule requires human review."
+            )
+
+    if final_coverage["human_review_required"]:
+        need(
+            "At least one required-fact rule requires human review."
+        )
+
+    if missing_evidence:
+        add(
+            "insufficient_evidence",
+            "warn",
+            missing_evidence,
+            "observed",
+            "high",
+            "Capture the missing trace fields, or use hashes and explicit safe metadata when content cannot be retained.",
+            unknown=missing_evidence,
+        )
+
     if not diagnoses:
-        add("no_clear_failure", "pass", ["No deterministic failure was identified from available evidence."], "observed", "medium", "Add more trace fields or run Gold Context Probe if the answer is still unacceptable.")
-    evidence_summary = _trace_evidence_summary(trace)
-    missing_count = len(evidence_summary["missing_or_redacted"])
-    evidence_score = max(0, 100 - 12 * len([d for d in diagnoses if d["category"] == "insufficient_evidence"]) - min(40, missing_count * 3))
-    return {"schema_version": RAG_DIAGNOSIS_SCHEMA_VERSION, "timestamp": utc_now(), "inferdoctor_version": __version__, "case_id": case.get("case_id"), "trace_id": trace.get("trace_id"), "status": "FAIL" if any(d["status"] == "fail" for d in diagnoses) else "WARN" if any(d["status"] == "warn" for d in diagnoses) else "PASS", "evidence_completeness_score": evidence_score, "evidence_completeness": evidence_summary, "diagnoses": diagnoses, "required_fact_coverage": {"context": context_coverage, "final_answer": final_coverage}, "forbidden_claims": _forbidden_claims(case, final or raw)}
+        add(
+            "no_clear_failure",
+            "pass",
+            [
+                "No deterministic failure was identified from the available evidence."
+            ],
+            "observed",
+            "medium",
+            "Add more trace fields or run Gold Context Probe if the answer is still unacceptable.",
+        )
 
+    evidence_summary = _trace_evidence_summary(
+        trace
+    )
 
-def compare_rag(case: Dict[str, Any], before: Dict[str, Any], after: Dict[str, Any]) -> Dict[str, Any]:
-    compatibility: List[str] = []
-    if before.get("case_id") and after.get("case_id") and before.get("case_id") != after.get("case_id"):
-        compatibility.append("case IDs differ")
-    before_q = before.get("input", {}).get("original_question")
-    after_q = after.get("input", {}).get("original_question")
-    if before_q and after_q and before_q != after_q:
-        compatibility.append("questions differ")
-    if before.get("pipeline") != after.get("pipeline"):
-        compatibility.append("pipeline differs")
-    if before.get("generation", {}).get("model") != after.get("generation", {}).get("model"):
-        compatibility.append("model differs")
-    before_diag = diagnose_rag(case, before)
-    after_diag = diagnose_rag(case, after)
-    before_context = before_diag["required_fact_coverage"]["context"]
-    after_context = after_diag["required_fact_coverage"]["context"]
-    before_final = before_diag["required_fact_coverage"]["final_answer"]
-    after_final = after_diag["required_fact_coverage"]["final_answer"]
-    changes = {
-        "context_required_fact_delta": after_context["matched"] - before_context["matched"],
-        "final_required_fact_delta": after_final["matched"] - before_final["matched"],
-        "forbidden_claim_delta": len(after_diag["forbidden_claims"]["hits"]) - len(before_diag["forbidden_claims"]["hits"]),
-        "retrieval_latency_ms_delta": _num(after, "retrieval", "latency_ms") - _num(before, "retrieval", "latency_ms"),
-        "generation_total_ms_delta": _num(after, "generation", "total_ms") - _num(before, "generation", "total_ms"),
+    missing_count = len(
+        evidence_summary[
+            "missing_or_redacted"
+        ]
+    )
+
+    evidence_score = max(
+        0,
+        100
+        - 12 * len([
+            diagnosis
+            for diagnosis in diagnoses
+            if (
+                diagnosis["category"]
+                == "insufficient_evidence"
+            )
+        ])
+        - min(
+            40,
+            missing_count * 3,
+        ),
+    )
+
+    evidence_states = {
+        "retrieval_candidates": (
+            "available"
+            if retrieval_known
+            else "missing"
+        ),
+        "selected_chunk_ids": (
+            "available"
+            if selection_known
+            else "missing"
+        ),
+        "context_text": context_state,
+        "raw_answer": raw_state,
+        "final_answer": final_state,
     }
+
+    return _apply_rag_attribution({
+        "schema_version": (
+            RAG_DIAGNOSIS_SCHEMA_VERSION
+        ),
+        "timestamp": utc_now(),
+        "inferdoctor_version": __version__,
+        "case_id": case.get("case_id"),
+        "trace_id": trace.get("trace_id"),
+        "status": (
+            "FAIL"
+            if any(
+                diagnosis["status"] == "fail"
+                for diagnosis in diagnoses
+            )
+            else "WARN"
+            if any(
+                diagnosis["status"] == "warn"
+                for diagnosis in diagnoses
+            )
+            else "PASS"
+        ),
+        "evidence_completeness_score": (
+            evidence_score
+        ),
+        "evidence_completeness": (
+            evidence_summary
+        ),
+        "evidence_states": evidence_states,
+        "diagnoses": diagnoses,
+        "required_fact_coverage": {
+            "context": context_coverage,
+            "raw_answer": raw_coverage,
+            "final_answer": final_coverage,
+        },
+        "forbidden_claims": forbidden,
+    })
+
+
+RAG_LAYER_ORDER = {
+    "conversation_memory_contamination": 10,
+    "retrieval_failure": 20,
+    "ranking_failure": 30,
+    "context_selection_failure": 40,
+    "context_truncation": 50,
+    "prompt_grounding_failure": 60,
+    "model_reasoning_limitation": 70,
+    "answer_postprocessing_failure": 80,
+}
+
+RAG_LAYER_NAMES = {
+    "conversation_memory_contamination": "conversation",
+    "retrieval_failure": "retrieval",
+    "ranking_failure": "ranking",
+    "context_selection_failure": "context_selection",
+    "context_truncation": "context",
+    "prompt_grounding_failure": "prompt",
+    "model_reasoning_limitation": "generation",
+    "answer_postprocessing_failure": "postprocessing",
+}
+
+
+def _build_rag_attribution(
+    diagnoses: Sequence[Dict[str, Any]],
+) -> Dict[str, Any]:
+    candidates = []
+
+    for index, diagnosis in enumerate(diagnoses):
+        category = str(
+            diagnosis.get("category") or ""
+        )
+        order = RAG_LAYER_ORDER.get(category)
+
+        if order is None:
+            diagnosis["attribution_role"] = (
+                "evidence_or_summary"
+            )
+            continue
+
+        if diagnosis.get("status") not in {
+            "fail",
+            "warn",
+        }:
+            diagnosis["attribution_role"] = (
+                "not_broken"
+            )
+            continue
+
+        candidates.append(
+            (
+                order,
+                0
+                if diagnosis.get("status") == "fail"
+                else 1,
+                index,
+                diagnosis,
+            )
+        )
+
+    if not candidates:
+        return {
+            "first_broken_layer": None,
+            "first_broken_category": None,
+            "first_broken_status": None,
+            "confidence": "unknown",
+            "downstream_observations": [],
+            "causal_claim": (
+                "No broken layer was established "
+                "from the available evidence."
+            ),
+        }
+
+    candidates.sort(
+        key=lambda item: (
+            item[0],
+            item[1],
+            item[2],
+        )
+    )
+
+    first_order, _, _, first = candidates[0]
+    first_category = str(first["category"])
+
+    downstream = []
+
+    for order, _, _, diagnosis in candidates:
+        category = str(
+            diagnosis.get("category") or ""
+        )
+
+        if diagnosis is first:
+            diagnosis["attribution_role"] = (
+                "first_broken_layer"
+            )
+            continue
+
+        if order > first_order:
+            diagnosis["attribution_role"] = (
+                "downstream_observation"
+            )
+            downstream.append(category)
+        else:
+            diagnosis["attribution_role"] = (
+                "same_or_independent_layer"
+            )
+
+    first["downstream_effects"] = list(
+        dict.fromkeys(downstream)
+    )
+
+    return {
+        "first_broken_layer": (
+            RAG_LAYER_NAMES.get(
+                first_category,
+                first_category,
+            )
+        ),
+        "first_broken_category": first_category,
+        "first_broken_status": first.get(
+            "status"
+        ),
+        "confidence": first.get(
+            "confidence",
+            "unknown",
+        ),
+        "downstream_observations": list(
+            dict.fromkeys(downstream)
+        ),
+        "causal_claim": (
+            "This is the earliest supported broken "
+            "layer in pipeline order. Later findings "
+            "are downstream observations; causation "
+            "is not assumed unless separately proven."
+        ),
+    }
+
+
+def _apply_rag_attribution(
+    result: Dict[str, Any],
+) -> Dict[str, Any]:
+    diagnoses = result.get("diagnoses")
+
+    if not isinstance(diagnoses, list):
+        result["attribution"] = (
+            _build_rag_attribution([])
+        )
+        return result
+
+    result["attribution"] = (
+        _build_rag_attribution(diagnoses)
+    )
+
+    return result
+
+
+def compare_rag(
+    case: Dict[str, Any],
+    before: Dict[str, Any],
+    after: Dict[str, Any],
+) -> Dict[str, Any]:
+    compatibility: List[str] = []
+    limitations: List[str] = []
+
+    if (
+        before.get("case_id")
+        and after.get("case_id")
+        and before.get("case_id")
+        != after.get("case_id")
+    ):
+        compatibility.append(
+            "case IDs differ"
+        )
+
+    before_q = _section_dict(
+        before,
+        "input",
+    ).get("original_question")
+
+    after_q = _section_dict(
+        after,
+        "input",
+    ).get("original_question")
+
+    if (
+        before_q
+        and after_q
+        and before_q != after_q
+    ):
+        compatibility.append(
+            "questions differ"
+        )
+
+    if (
+        before.get("pipeline")
+        != after.get("pipeline")
+    ):
+        compatibility.append(
+            "pipeline differs"
+        )
+
+    before_model = _section_dict(
+        before,
+        "generation",
+    ).get("model")
+
+    after_model = _section_dict(
+        after,
+        "generation",
+    ).get("model")
+
+    if before_model != after_model:
+        compatibility.append(
+            "model differs"
+        )
+
+    before_diag = diagnose_rag(
+        case,
+        before,
+    )
+    after_diag = diagnose_rag(
+        case,
+        after,
+    )
+
+    before_context = (
+        before_diag[
+            "required_fact_coverage"
+        ]["context"]
+    )
+    after_context = (
+        after_diag[
+            "required_fact_coverage"
+        ]["context"]
+    )
+
+    before_final = (
+        before_diag[
+            "required_fact_coverage"
+        ]["final_answer"]
+    )
+    after_final = (
+        after_diag[
+            "required_fact_coverage"
+        ]["final_answer"]
+    )
+
+    quality_evaluable = (
+        before_final.get("evaluable") is True
+        and after_final.get("evaluable") is True
+        and before_context.get("evaluable") is True
+        and after_context.get("evaluable") is True
+        and before_diag[
+            "forbidden_claims"
+        ].get("evaluable") is True
+        and after_diag[
+            "forbidden_claims"
+        ].get("evaluable") is True
+    )
+
+    if not quality_evaluable:
+        limitations.append(
+            "Answer-quality comparison is "
+            "incomplete because context or answer "
+            "evidence is missing or redacted."
+        )
+
+    human_review_required = bool(
+        before_final.get(
+            "human_review_required"
+        )
+        or after_final.get(
+            "human_review_required"
+        )
+        or before_diag[
+            "forbidden_claims"
+        ].get(
+            "human_review_required"
+        )
+        or after_diag[
+            "forbidden_claims"
+        ].get(
+            "human_review_required"
+        )
+    )
+
+    if human_review_required:
+        limitations.append(
+            "At least one quality rule requires "
+            "human review."
+        )
+
+    retrieval_delta = _delta_num(
+        after,
+        before,
+        "retrieval",
+        "latency_ms",
+    )
+
+    generation_delta = _delta_num(
+        after,
+        before,
+        "generation",
+        "total_ms",
+    )
+
+    if retrieval_delta is None:
+        limitations.append(
+            "Retrieval latency delta is unknown."
+        )
+
+    if generation_delta is None:
+        limitations.append(
+            "Generation latency delta is unknown."
+        )
+
+    changes = {
+        "context_required_fact_delta": (
+            after_context["matched"]
+            - before_context["matched"]
+            if quality_evaluable
+            else None
+        ),
+        "final_required_fact_delta": (
+            after_final["matched"]
+            - before_final["matched"]
+            if quality_evaluable
+            else None
+        ),
+        "forbidden_claim_delta": (
+            len(
+                after_diag[
+                    "forbidden_claims"
+                ]["hits"]
+            )
+            - len(
+                before_diag[
+                    "forbidden_claims"
+                ]["hits"]
+            )
+            if quality_evaluable
+            else None
+        ),
+        "retrieval_latency_ms_delta": (
+            retrieval_delta
+        ),
+        "generation_total_ms_delta": (
+            generation_delta
+        ),
+    }
+
+    final_delta = changes[
+        "final_required_fact_delta"
+    ]
+    forbidden_delta = changes[
+        "forbidden_claim_delta"
+    ]
+
     if compatibility:
         verdict = "incompatible"
-    elif changes["final_required_fact_delta"] > 0 and changes["forbidden_claim_delta"] <= 0:
-        verdict = "improved"
-    elif changes["final_required_fact_delta"] < 0 or changes["forbidden_claim_delta"] > 0:
-        verdict = "regressed"
-    elif all(value == 0 for value in changes.values()):
-        verdict = "unchanged"
-    else:
+
+    elif (
+        not quality_evaluable
+        or human_review_required
+    ):
         verdict = "inconclusive"
-    return {"schema_version": RAG_COMPARISON_SCHEMA_VERSION, "timestamp": utc_now(), "inferdoctor_version": __version__, "case_id": case.get("case_id"), "verdict": verdict, "compatibility_warnings": compatibility, "changes": changes, "before_status": before_diag["status"], "after_status": after_diag["status"], "confidence": "low" if compatibility else "medium"}
+
+    elif (
+        isinstance(final_delta, (int, float))
+        and final_delta > 0
+        and (
+            forbidden_delta is None
+            or forbidden_delta <= 0
+        )
+    ):
+        verdict = "improved"
+
+    elif (
+        (
+            isinstance(
+                final_delta,
+                (int, float),
+            )
+            and final_delta < 0
+        )
+        or (
+            isinstance(
+                forbidden_delta,
+                (int, float),
+            )
+            and forbidden_delta > 0
+        )
+    ):
+        verdict = "regressed"
+
+    else:
+        quality_changes = [
+            changes[
+                "context_required_fact_delta"
+            ],
+            changes[
+                "final_required_fact_delta"
+            ],
+            changes[
+                "forbidden_claim_delta"
+            ],
+        ]
+
+        performance_changes = [
+            retrieval_delta,
+            generation_delta,
+        ]
+
+        if (
+            all(
+                value == 0
+                for value in quality_changes
+            )
+            and all(
+                value == 0
+                for value in performance_changes
+                if value is not None
+            )
+            and all(
+                value is not None
+                for value in performance_changes
+            )
+        ):
+            verdict = "unchanged"
+        else:
+            verdict = "inconclusive"
+
+    before_first = (
+        before_diag.get(
+            "attribution",
+            {},
+        ).get("first_broken_layer")
+    )
+
+    after_first = (
+        after_diag.get(
+            "attribution",
+            {},
+        ).get("first_broken_layer")
+    )
+
+    return {
+        "schema_version": (
+            RAG_COMPARISON_SCHEMA_VERSION
+        ),
+        "timestamp": utc_now(),
+        "inferdoctor_version": __version__,
+        "case_id": case.get("case_id"),
+        "verdict": verdict,
+        "compatibility_warnings": (
+            compatibility
+        ),
+        "comparison_limitations": (
+            list(dict.fromkeys(limitations))
+        ),
+        "changes": changes,
+        "before_status": (
+            before_diag["status"]
+        ),
+        "after_status": (
+            after_diag["status"]
+        ),
+        "before_first_broken_layer": (
+            before_first
+        ),
+        "after_first_broken_layer": (
+            after_first
+        ),
+        "first_broken_layer_changed": (
+            before_first != after_first
+        ),
+        "confidence": (
+            "low"
+            if (
+                compatibility
+                or not quality_evaluable
+                or human_review_required
+            )
+            else "medium"
+        ),
+    }
 
 
-def _num(data: Dict[str, Any], section: str, key: str) -> float:
-    value = data.get(section, {}).get(key)
-    return float(value) if isinstance(value, (int, float)) else 0.0
+def _num(
+    data: Dict[str, Any],
+    section: str,
+    key: str,
+) -> Optional[float]:
+    value = _section_dict(
+        data,
+        section,
+    ).get(key)
 
+    if not isinstance(
+        value,
+        (int, float),
+    ):
+        return None
+
+    return float(value)
+
+
+def _delta_num(
+    after: Dict[str, Any],
+    before: Dict[str, Any],
+    section: str,
+    key: str,
+) -> Optional[float]:
+    after_value = _num(
+        after,
+        section,
+        key,
+    )
+    before_value = _num(
+        before,
+        section,
+        key,
+    )
+
+    if (
+        after_value is None
+        or before_value is None
+    ):
+        return None
+
+    return (
+        after_value
+        - before_value
+    )
 
 def _chat_payload(case: Dict[str, Any], context: str, *, retain_answer: bool) -> Dict[str, Any]:
     prompt = (

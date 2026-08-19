@@ -301,3 +301,318 @@ def test_rag_cli_help(capsys):
             main(args)
         assert exc.value.code == 0
         assert "usage:" in capsys.readouterr().out
+
+
+def test_diagnose_missing_retrieval_candidates_is_insufficient_not_failure():
+    item = trace()
+    item["retrieval"].pop("candidates")
+
+    result = diagnose_rag(
+        case(),
+        item,
+    )
+
+    categories = [
+        diagnosis["category"]
+        for diagnosis in result["diagnoses"]
+    ]
+
+    assert result["status"] == "WARN"
+    assert "insufficient_evidence" in categories
+    assert "retrieval_failure" not in categories
+
+    assert (
+        result["evidence_states"]
+        ["retrieval_candidates"]
+        == "missing"
+    )
+
+
+def test_diagnose_explicit_empty_retrieval_is_observed_failure():
+    item = trace(
+        retrieved=False,
+        answer=False,
+    )
+
+    result = diagnose_rag(
+        case(),
+        item,
+    )
+
+    categories = [
+        diagnosis["category"]
+        for diagnosis in result["diagnoses"]
+    ]
+
+    assert result["status"] == "FAIL"
+    assert "retrieval_failure" in categories
+
+    assert (
+        result["evidence_states"]
+        ["retrieval_candidates"]
+        == "available"
+    )
+
+
+def test_diagnose_missing_selected_chunks_is_not_selection_failure():
+    item = trace()
+    item["context_selection"].pop(
+        "selected_chunk_ids"
+    )
+
+    result = diagnose_rag(
+        case(),
+        item,
+    )
+
+    categories = [
+        diagnosis["category"]
+        for diagnosis in result["diagnoses"]
+    ]
+
+    assert result["status"] == "WARN"
+    assert "insufficient_evidence" in categories
+    assert (
+        "context_selection_failure"
+        not in categories
+    )
+
+
+def test_diagnose_redacted_context_and_answers_remain_inconclusive():
+    item = trace()
+
+    context_text = (
+        item["context_selection"].pop(
+            "context_text"
+        )
+    )
+    raw_answer = (
+        item["generation"].pop(
+            "raw_answer"
+        )
+    )
+    final_answer = (
+        item["postprocessing"].pop(
+            "final_answer"
+        )
+    )
+
+    item["context_selection"][
+        "context_sha256"
+    ] = rag_module.sha256_text(
+        context_text
+    )
+
+    item["generation"][
+        "raw_answer_sha256"
+    ] = rag_module.sha256_text(
+        raw_answer
+    )
+
+    item["postprocessing"][
+        "final_answer_sha256"
+    ] = rag_module.sha256_text(
+        final_answer
+    )
+
+    result = diagnose_rag(
+        case(),
+        item,
+    )
+
+    categories = [
+        diagnosis["category"]
+        for diagnosis in result["diagnoses"]
+    ]
+
+    assert result["status"] == "WARN"
+    assert "insufficient_evidence" in categories
+    assert "no_clear_failure" not in categories
+
+    assert (
+        result["evidence_states"]
+        ["context_text"]
+        == "redacted"
+    )
+    assert (
+        result["evidence_states"]
+        ["raw_answer"]
+        == "redacted"
+    )
+    assert (
+        result["evidence_states"]
+        ["final_answer"]
+        == "redacted"
+    )
+
+    assert (
+        result["required_fact_coverage"]
+        ["context"]["evaluable"]
+        is False
+    )
+    assert (
+        result["required_fact_coverage"]
+        ["final_answer"]["evaluable"]
+        is False
+    )
+    assert (
+        result["forbidden_claims"]
+        ["evaluable"]
+        is False
+    )
+
+
+def test_first_broken_layer_is_retrieval():
+    item = trace(
+        retrieved=False,
+        answer=False,
+    )
+
+    result = diagnose_rag(
+        case(),
+        item,
+    )
+
+    attribution = result[
+        "attribution"
+    ]
+
+    assert (
+        attribution[
+            "first_broken_layer"
+        ]
+        == "retrieval"
+    )
+
+    assert (
+        attribution[
+            "first_broken_category"
+        ]
+        == "retrieval_failure"
+    )
+
+    first = [
+        item
+        for item in result["diagnoses"]
+        if (
+            item.get(
+                "attribution_role"
+            )
+            == "first_broken_layer"
+        )
+    ]
+
+    assert len(first) == 1
+
+
+def test_first_broken_layer_precedes_postprocessing():
+    item = trace(
+        answer=True,
+    )
+
+    item["postprocessing"][
+        "final_answer"
+    ] = "I do not know."
+
+    result = diagnose_rag(
+        case(),
+        item,
+    )
+
+    assert (
+        result["attribution"][
+            "first_broken_layer"
+        ]
+        == "postprocessing"
+    )
+
+
+def test_insufficient_evidence_is_not_a_broken_layer():
+    item = trace()
+    item["retrieval"].pop(
+        "candidates"
+    )
+
+    result = diagnose_rag(
+        case(),
+        item,
+    )
+
+    assert (
+        result["attribution"][
+            "first_broken_layer"
+        ]
+        is None
+    )
+
+
+def test_compare_missing_latency_does_not_become_zero():
+    before = trace()
+    after = trace()
+
+    before["retrieval"].pop(
+        "latency_ms"
+    )
+    after["generation"].pop(
+        "total_ms"
+    )
+
+    result = compare_rag(
+        case(),
+        before,
+        after,
+    )
+
+    assert (
+        result["changes"][
+            "retrieval_latency_ms_delta"
+        ]
+        is None
+    )
+
+    assert (
+        result["changes"][
+            "generation_total_ms_delta"
+        ]
+        is None
+    )
+
+    assert (
+        result["verdict"]
+        == "inconclusive"
+    )
+
+
+def test_compare_reports_first_broken_layer_change():
+    before = trace(
+        retrieved=False,
+        answer=False,
+    )
+    after = trace()
+
+    result = compare_rag(
+        case(),
+        before,
+        after,
+    )
+
+    assert (
+        result[
+            "before_first_broken_layer"
+        ]
+        == "retrieval"
+    )
+
+    assert (
+        result[
+            "after_first_broken_layer"
+        ]
+        is None
+    )
+
+    assert (
+        result[
+            "first_broken_layer_changed"
+        ]
+        is True
+    )
