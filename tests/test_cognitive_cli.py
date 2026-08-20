@@ -170,3 +170,111 @@ def test_cognitive_diagnose_accepts_dify_capture_envelope(
         "--trace",
         str(trace_path),
     ]) == 0
+
+
+def test_cognitive_probe_next_recommends_gold_route(
+    tmp_path,
+    capsys,
+):
+    case_path = tmp_path / "case.json"
+    trace_path = tmp_path / "trace.json"
+
+    case_path.write_text(
+        json.dumps({
+            "schema_version": (
+                COGNITIVE_CASE_SCHEMA_VERSION
+            ),
+            "case_id": "probe-case",
+            "expected_intent": "refund",
+            "expected_route": (
+                "refund-route"
+            ),
+        }),
+        encoding="utf-8",
+    )
+
+    write_trace(
+        trace_path,
+        route="wrong-route",
+    )
+
+    assert main([
+        "cognitive",
+        "probe",
+        "next",
+        "--case",
+        str(case_path),
+        "--trace",
+        str(trace_path),
+    ]) == 0
+
+    output = (
+        capsys.readouterr().out
+    )
+
+    assert (
+        "next_probe: gold_route"
+        in output
+    )
+
+    assert (
+        "target_layer: route"
+        in output
+    )
+
+
+def test_cognitive_probe_next_json_output(
+    tmp_path,
+):
+    case_path = tmp_path / "case.json"
+    trace_path = tmp_path / "trace.json"
+    output_path = tmp_path / "probe.json"
+
+    case_path.write_text(
+        json.dumps({
+            "schema_version": (
+                COGNITIVE_CASE_SCHEMA_VERSION
+            ),
+            "case_id": "probe-json",
+            "expected_intent": "refund",
+            "expected_route": (
+                "refund-route"
+            ),
+        }),
+        encoding="utf-8",
+    )
+
+    write_trace(
+        trace_path,
+        route="wrong-route",
+    )
+
+    assert main([
+        "cognitive",
+        "probe",
+        "next",
+        "--case",
+        str(case_path),
+        "--trace",
+        str(trace_path),
+        "--format",
+        "json",
+        "--output",
+        str(output_path),
+    ]) == 0
+
+    result = json.loads(
+        output_path.read_text(
+            encoding="utf-8"
+        )
+    )
+
+    assert (
+        result["next_probe"]
+        == "gold_route"
+    )
+
+    assert (
+        result["target_layer"]
+        == "route"
+    )

@@ -43,6 +43,10 @@ from inferdoctor.core.cognitive_semantics import (
     load_cognitive_trace,
     validate_cognitive_case_file,
 )
+from inferdoctor.core.cognitive_probes import (
+    plan_next_cognitive_probe,
+    render_probe_plan,
+)
 from inferdoctor.core.dify_reliability import (
     render_reliability_report,
     run_dify_connectivity_check,
@@ -638,6 +642,36 @@ def _parser() -> argparse.ArgumentParser:
         required=True,
     )
     cognitive_diagnose.add_argument(
+        "--output",
+    )
+
+    cognitive_probe = cognitive_subparsers.add_parser(
+        "probe",
+        help="Plan the smallest controlled cognitive diagnostic experiment",
+    )
+    cognitive_probe_subparsers = cognitive_probe.add_subparsers(
+        dest="cognitive_probe_command",
+        required=True,
+    )
+
+    cognitive_probe_next = cognitive_probe_subparsers.add_parser(
+        "next",
+        help="Recommend the next Gold Probe from a Cognitive Case and Trace",
+    )
+    cognitive_probe_next.add_argument(
+        "--case",
+        required=True,
+    )
+    cognitive_probe_next.add_argument(
+        "--trace",
+        required=True,
+    )
+    cognitive_probe_next.add_argument(
+        "--format",
+        choices=("console", "json"),
+        default="console",
+    )
+    cognitive_probe_next.add_argument(
         "--output",
     )
 
@@ -1432,6 +1466,49 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     == "FAIL"
                     else 0
                 )
+
+            if (
+                args.cognitive_command
+                == "probe"
+                and args.cognitive_probe_command
+                == "next"
+            ):
+                analysis = (
+                    evaluate_cognitive_case(
+                        load_cognitive_case(
+                            args.case
+                        ),
+                        load_cognitive_trace(
+                            args.trace
+                        ),
+                    )
+                )
+
+                plan = (
+                    plan_next_cognitive_probe(
+                        analysis
+                    )
+                )
+
+                if args.format == "json":
+                    rendered = json.dumps(
+                        plan,
+                        indent=2,
+                        sort_keys=True,
+                    )
+                else:
+                    rendered = (
+                        render_probe_plan(
+                            plan
+                        )
+                    )
+
+                _emit_output(
+                    rendered,
+                    args.output,
+                )
+
+                return 0
 
         except (
             ValueError,

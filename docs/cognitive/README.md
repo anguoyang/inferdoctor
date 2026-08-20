@@ -70,3 +70,31 @@ Example interpretation:
 In that case Route is the first semantic broken layer. Later problems must not automatically be blamed on retrieval or model capability.
 
 Missing semantic evidence produces `UNKNOWN`, not failure.
+
+## Minimal next probe
+
+After semantic attribution, InferDoctor recommends only the smallest controlled experiment needed to move the diagnosis forward.
+
+Examples:
+
+- Intent failure -> Gold Intent
+- Route failure -> Gold Route
+- Plan failure -> Gold Plan
+- Action/tool failure -> Gold Tool Result
+- Retrieval/context failure -> Gold Context
+- Generation failure -> model capability probe only after upstream evidence is fixed
+- Post-processing failure -> raw-vs-final comparison
+
+The planner follows a one-variable rule: do not change intent, routing, retrieval, prompt, and model at the same time.
+
+A Gold Probe is evidence isolation, not an optimization engine. InferDoctor does not implement another agent framework or workflow engine to perform the override.
+
+### CLI
+
+Plan the next controlled experiment from an existing Cognitive Case and Trace:
+
+`inferdoctor cognitive probe next --case case.json --trace cognitive.json`
+
+JSON output is also available:
+
+`inferdoctor cognitive probe next --case case.json --trace cognitive.json --format json --output probe.json`
