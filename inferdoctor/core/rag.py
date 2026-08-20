@@ -2450,7 +2450,7 @@ def _chat_payload(case: Dict[str, Any], context: str, *, retain_answer: bool) ->
     }
 
 
-def _gold_probe_evaluation(answer: str, case: Dict[str, Any]) -> Dict[str, Any]:
+def evaluate_deterministic_answer(answer: str, case: Dict[str, Any]) -> Dict[str, Any]:
     required = _required_fact_coverage(case, answer)
     forbidden = _forbidden_claims(case, answer)
     required_total = int(required.get("total") or 0)
@@ -2496,6 +2496,42 @@ def _gold_probe_evaluation(answer: str, case: Dict[str, Any]) -> Dict[str, Any]:
         "overall_status": overall_status,
         "status": overall_status.upper(),
         "diagnostic_interpretation": interpretation,
+    }
+
+
+def _gold_probe_evaluation(answer: str, case: Dict[str, Any]) -> Dict[str, Any]:
+    """Backward-compatible alias for the shared deterministic evaluator."""
+    return evaluate_deterministic_answer(answer, case)
+
+
+def unavailable_deterministic_answer(
+    case: Dict[str, Any],
+    *,
+    evidence_state: str,
+) -> Dict[str, Any]:
+    required = _unevaluable_required_fact_coverage(case, evidence_state)
+    forbidden = _unevaluable_forbidden_claims(case, evidence_state)
+    return {
+        "required_fact_checks": required,
+        "forbidden_claim_checks": forbidden,
+        "required_facts_total": int(required.get("total") or 0),
+        "required_facts_matched": 0,
+        "forbidden_claims_total": int(forbidden.get("total") or 0),
+        "forbidden_claims_matched": 0,
+        "deterministic_checks_available": bool(
+            required.get("deterministic") or forbidden.get("deterministic")
+        ),
+        "human_review_required": bool(
+            required.get("human_review_required")
+            or forbidden.get("human_review_required")
+        ),
+        "evaluation_status": "unknown",
+        "review_status": "unavailable",
+        "overall_status": "unknown",
+        "status": "UNKNOWN",
+        "diagnostic_interpretation": (
+            "No usable response evidence was available for deterministic answer verification."
+        ),
     }
 
 
@@ -2571,7 +2607,7 @@ def run_gold_context_probe(case: Dict[str, Any], *, context_text: str, endpoint:
         parsed = response.json_data
         elapsed = response.elapsed_ms
         answer = _extract_chat_answer(parsed)
-        evaluation = _gold_probe_evaluation(answer, case)
+        evaluation = evaluate_deterministic_answer(answer, case)
         result.update(evaluation)
         result.update({
             "request_sent": True,
