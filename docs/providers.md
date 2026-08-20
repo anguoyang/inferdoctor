@@ -56,10 +56,22 @@ Public endpoints require explicit `--allow-public`. LAN/private presets require 
 Evidence remains conservative:
 
 - unsupported `/models` means model availability is `UNKNOWN`, not `FAIL`;
-- a listed model is evidence of availability, while a missing listing without invocation remains `UNKNOWN`;
+- a model listed by `/models` proves catalog presence, not key-specific invocation access; actual model access remains `UNKNOWN` until invocation succeeds;
 - TTFT is `null` / `UNKNOWN` because Provider Check does not perform a streaming TTFT measurement;
 - pricing and API cost are `null` / `UNKNOWN` without direct evidence;
 - total compute cost is always `null` / `UNKNOWN` in this MVP;
 - the optional chat response body is evaluated in memory for protocol success and is not retained.
 
 Tests use mocked HTTP responses and do not require external services or API keys.
+
+
+A successful `/models` request establishes connectivity and authentication but does not prove that the same key can invoke every listed model.
+
+During an explicit smoke request:
+
+- HTTP 401 is authentication failure;
+- HTTP 403 is permission/model-access failure;
+- HTTP 402 is billing/credit failure;
+- HTTP 429 is quota/rate-limit failure.
+
+Later evidence must not incorrectly overwrite an already established authentication result with an unrelated permission failure.

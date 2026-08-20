@@ -79,9 +79,24 @@ def test_models_check_passes_without_chat_and_keeps_unknown_metrics(monkeypatch)
         )
 
     assert models_probe is None
-    assert result["status"] == "PASS"
+    assert result["status"] == "UNKNOWN"
     assert result["models_probe"]["model_count"] == 2
     assert result["models_probe"]["selected_model_listed"] is True
+
+    catalog = [
+        item
+        for item in result["checks"]
+        if item["name"] == "model_catalog"
+    ][-1]
+
+    availability = [
+        item
+        for item in result["checks"]
+        if item["name"] == "model_availability"
+    ][-1]
+
+    assert catalog["status"] == "PASS"
+    assert availability["status"] == "UNKNOWN"
     assert result["chat_smoke"]["status"] == "SKIP"
     assert result["metrics"]["ttft_ms"] is None
     assert result["metrics"]["total_latency_ms"] is None
@@ -212,7 +227,7 @@ def test_api_key_and_partner_metadata_do_not_influence_diagnosis(monkeypatch):
         allow_public=True,
     )
 
-    assert baseline["status"] == partner["status"] == "PASS"
+    assert baseline["status"] == partner["status"] == "UNKNOWN"
     assert [item["status"] for item in baseline["checks"]] == [
         item["status"] for item in partner["checks"]
     ]
@@ -308,3 +323,148 @@ def test_provider_check_malformed_key_fails_safely_without_secret():
     assert "very-secret-value" not in serialized
     assert bad_key not in serialized
     assert "invalid whitespace" in serialized
+
+
+
+def test_chat_403_is_model_access_failure_not_authentication_failure(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        "inferdoctor.core.providers.list_models",
+        lambda *_args, **_kwargs: _response(
+            data={
+                "data": [
+                    {
+                        "id": "orcarouter/free"
+                    }
+                ]
+            }
+        ),
+    )
+
+    monkeypatch.setattr(
+        "inferdoctor.core.providers.create_chat_completion",
+        lambda *_args, **_kwargs: _response(
+            status=403,
+            data={
+                "error": {
+                    "type": "orcarouter_api_error",
+                    "message": (
+                        "This API key does not have access "
+                        "to model orcarouter/free."
+                    ),
+                }
+            },
+            elapsed_ms=25,
+        ),
+    )
+
+    result = run_provider_check(
+        get_provider_preset(
+            "orcarouter"
+        ),
+        api_key="secret",
+        allow_public=True,
+        smoke=True,
+        model="orcarouter/free",
+    )
+
+    assert (
+        result["status"]
+        == "FAIL"
+    )
+
+    assert (
+        result["models_probe"][
+            "selected_model_listed"
+        ]
+        is True
+    )
+
+    auth_checks = [
+        item
+        for item
+        in result["checks"]
+        if item["name"]
+        == "authentication"
+    ]
+
+    assert any(
+        item["status"] == "PASS"
+        for item in auth_checks
+    )
+
+    assert not any(
+        item["status"] == "FAIL"
+        for item in auth_checks
+    )
+
+    access = [
+        item
+        for item
+        in result["checks"]
+        if item["name"]
+        == "model_access"
+    ][-1]
+
+    assert (
+        access["status"]
+        == "FAIL"
+    )
+
+    assert (
+        result["chat_smoke"][
+            "http_status"
+        ]
+        == 403
+    )
+
+
+def test_chat_401_remains_authentication_failure(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        "inferdoctor.core.providers.list_models",
+        lambda *_args, **_kwargs: _response(
+            status=404,
+            data={
+                "error": "unsupported"
+            },
+        ),
+    )
+
+    monkeypatch.setattr(
+        "inferdoctor.core.providers.create_chat_completion",
+        lambda *_args, **_kwargs: _response(
+            status=401,
+            data={
+                "error": {
+                    "message": "bad key"
+                }
+            },
+        ),
+    )
+
+    result = run_provider_check(
+        get_provider_preset(
+            "orcarouter"
+        ),
+        api_key="secret",
+        allow_public=True,
+        smoke=True,
+        model="orcarouter/free",
+    )
+
+    auth = [
+        item
+        for item
+        in result["checks"]
+        if (
+            item["name"]
+            == "authentication"
+            and item["status"]
+            == "FAIL"
+        )
+    ]
+
+    assert auth

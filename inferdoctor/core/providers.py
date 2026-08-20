@@ -217,8 +217,23 @@ def _evaluate_models(
     )
     _add_check(result, "authentication", "PASS", "The authenticated request returned an OpenAI-compatible model list.", http_status=status)
     if listed is True:
-        _add_check(result, "model_availability", "PASS", "The selected model was listed by the provider.", model=model, model_count=len(ids))
-        return "PASS", True
+        _add_check(
+            result,
+            "model_catalog",
+            "PASS",
+            "The selected model was listed in the provider model catalog.",
+            model=model,
+            model_count=len(ids),
+        )
+        _add_check(
+            result,
+            "model_availability",
+            "UNKNOWN",
+            "Catalog listing does not prove that this API key can invoke the selected model.",
+            model=model,
+            model_count=len(ids),
+        )
+        return "UNKNOWN", True
     if model:
         _add_check(result, "model_availability", "UNKNOWN", "The selected model was not listed; invocation was not attempted.", model=model, model_count=len(ids))
         return "UNKNOWN", True
@@ -260,9 +275,63 @@ def _run_chat(
     result["metrics"]["total_latency_ms"] = response.elapsed_ms
     if not 200 <= status < 300:
         result["chat_smoke"]["status"] = "FAIL"
-        if status in (401, 403):
-            _add_check(result, "authentication", "FAIL", "The optional chat request was rejected by authentication.", http_status=status)
-        _add_check(result, "chat_smoke", "FAIL", "The optional chat request returned HTTP {0}.".format(status), http_status=status)
+
+        if status == 401:
+            _add_check(
+                result,
+                "authentication",
+                "FAIL",
+                "The optional chat request rejected the configured API key.",
+                http_status=status,
+            )
+
+        elif status == 403:
+            _add_check(
+                result,
+                "model_access",
+                "FAIL",
+                "The API key authenticated, but the provider denied permission to invoke the selected model.",
+                http_status=status,
+                model=model,
+            )
+
+        elif status == 402:
+            _add_check(
+                result,
+                "billing_or_credit",
+                "FAIL",
+                "The provider rejected the request because billing or credit is required.",
+                http_status=status,
+            )
+
+        elif status == 429:
+            _add_check(
+                result,
+                "quota_or_rate_limit",
+                "FAIL",
+                "The provider rejected the request because a quota or rate limit was reached.",
+                http_status=status,
+            )
+
+        else:
+            _add_check(
+                result,
+                "request_rejection",
+                "UNKNOWN",
+                "The provider rejected the optional chat request for an unclassified reason.",
+                http_status=status,
+            )
+
+        _add_check(
+            result,
+            "chat_smoke",
+            "FAIL",
+            "The optional chat request returned HTTP {0}.".format(
+                status
+            ),
+            http_status=status,
+        )
+
         return "FAIL"
     if not response.json_valid or not extract_chat_text(response.json_data).strip():
         result["chat_smoke"]["status"] = "FAIL"
@@ -271,6 +340,13 @@ def _run_chat(
 
     result["chat_smoke"].update({"status": "PASS", "selected_model_invoked": True})
     _add_check(result, "authentication", "PASS", "The optional authenticated chat request was accepted.", http_status=status)
+    _add_check(
+        result,
+        "model_access",
+        "PASS",
+        "The selected model was successfully invoked with this API key.",
+        model=model,
+    )
     _add_check(result, "model_availability", "PASS", "The selected model produced usable chat content.", model=model)
     _add_check(result, "chat_smoke", "PASS", "Usable content was returned and not retained.", http_status=status, model=model, total_latency_ms=response.elapsed_ms)
     return "PASS"
