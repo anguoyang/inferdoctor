@@ -98,3 +98,33 @@ Plan the next controlled experiment from an existing Cognitive Case and Trace:
 JSON output is also available:
 
 `inferdoctor cognitive probe next --case case.json --trace cognitive.json --format json --output probe.json`
+
+## Controlled replay comparison
+
+A Gold Probe becomes stronger evidence when its replay is compared with the original trace.
+
+InferDoctor checks whether:
+
+1. the replay target was the original first broken layer;
+2. the target changed from semantic FAIL to PASS;
+3. the first broken layer moved downstream, or all evaluated failures cleared.
+
+A downstream move supports `VALIDATED_UPSTREAM_BOTTLENECK`.
+
+Example:
+
+`Before: Route FAIL -> After Gold Route: Route PASS, Retrieval FAIL`
+
+This supports Route as an upstream bottleneck and exposes Retrieval as the next failure.
+
+The comparison does not prove that only one external variable changed. Experimental control must come from the replay procedure; InferDoctor reports that causal boundary explicitly.
+
+### Controlled replay CLI
+
+Compare a baseline trace with a controlled Gold Probe replay:
+
+`inferdoctor cognitive replay compare --case case.json --before before.json --after after.json --target-layer route --probe-name gold_route`
+
+JSON output:
+
+`inferdoctor cognitive replay compare --case case.json --before before.json --after after.json --target-layer route --probe-name gold_route --format json --output replay.json`

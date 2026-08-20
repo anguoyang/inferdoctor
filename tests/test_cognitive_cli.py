@@ -278,3 +278,210 @@ def test_cognitive_probe_next_json_output(
         result["target_layer"]
         == "route"
     )
+
+
+def _write_replay_trace(
+    path,
+    *,
+    route,
+    source,
+):
+    trace = {
+        "schema_version": (
+            COGNITIVE_TRACE_SCHEMA_VERSION
+        ),
+        "observations": [
+            {
+                "layer": "intent",
+                "node_type": (
+                    "question-classifier"
+                ),
+                "status": "succeeded",
+                "decision_sha256": (
+                    semantic_value_sha256(
+                        "refund"
+                    )
+                ),
+            },
+            {
+                "layer": "route",
+                "node_type": "if-else",
+                "status": "succeeded",
+                "decision_sha256": (
+                    semantic_value_sha256(
+                        route
+                    )
+                ),
+            },
+            {
+                "layer": "retrieval",
+                "node_type": (
+                    "retriever_resources"
+                ),
+                "status": "succeeded",
+                "source_ids": [
+                    source
+                ],
+            },
+        ],
+    }
+
+    path.write_text(
+        json.dumps(trace),
+        encoding="utf-8",
+    )
+
+
+def test_cognitive_replay_cli_validates_downstream_movement(
+    tmp_path,
+    capsys,
+):
+    case_path = tmp_path / "case.json"
+    before_path = tmp_path / "before.json"
+    after_path = tmp_path / "after.json"
+
+    case_path.write_text(
+        json.dumps({
+            "schema_version": (
+                COGNITIVE_CASE_SCHEMA_VERSION
+            ),
+            "case_id": "replay-cli",
+            "expected_intent": "refund",
+            "expected_route": (
+                "refund-route"
+            ),
+            "expected_sources": [
+                "doc-policy"
+            ],
+        }),
+        encoding="utf-8",
+    )
+
+    _write_replay_trace(
+        before_path,
+        route="wrong-route",
+        source="doc-wrong",
+    )
+
+    _write_replay_trace(
+        after_path,
+        route="refund-route",
+        source="doc-wrong",
+    )
+
+    code = main([
+        "cognitive",
+        "replay",
+        "compare",
+        "--case",
+        str(case_path),
+        "--before",
+        str(before_path),
+        "--after",
+        str(after_path),
+        "--target-layer",
+        "route",
+        "--probe-name",
+        "gold_route",
+    ])
+
+    assert code == 0
+
+    output = (
+        capsys.readouterr().out
+    )
+
+    assert (
+        "VALIDATED_UPSTREAM_BOTTLENECK"
+        in output
+    )
+
+    assert (
+        "first_broken_layer: retrieval"
+        in output
+    )
+
+
+def test_cognitive_replay_cli_json_output(
+    tmp_path,
+):
+    case_path = tmp_path / "case.json"
+    before_path = tmp_path / "before.json"
+    after_path = tmp_path / "after.json"
+    output_path = tmp_path / "result.json"
+
+    case_path.write_text(
+        json.dumps({
+            "schema_version": (
+                COGNITIVE_CASE_SCHEMA_VERSION
+            ),
+            "case_id": "replay-json",
+            "expected_intent": "refund",
+            "expected_route": (
+                "refund-route"
+            ),
+            "expected_sources": [
+                "doc-policy"
+            ],
+        }),
+        encoding="utf-8",
+    )
+
+    _write_replay_trace(
+        before_path,
+        route="wrong-route",
+        source="doc-wrong",
+    )
+
+    _write_replay_trace(
+        after_path,
+        route="refund-route",
+        source="doc-wrong",
+    )
+
+    code = main([
+        "cognitive",
+        "replay",
+        "compare",
+        "--case",
+        str(case_path),
+        "--before",
+        str(before_path),
+        "--after",
+        str(after_path),
+        "--target-layer",
+        "route",
+        "--probe-name",
+        "gold_route",
+        "--format",
+        "json",
+        "--output",
+        str(output_path),
+    ])
+
+    assert code == 0
+
+    result = json.loads(
+        output_path.read_text(
+            encoding="utf-8"
+        )
+    )
+
+    assert (
+        result["verdict"]
+        == "VALIDATED_UPSTREAM_BOTTLENECK"
+    )
+
+    assert (
+        result["before"][
+            "first_broken_layer"
+        ]
+        == "route"
+    )
+
+    assert (
+        result["after"][
+            "first_broken_layer"
+        ]
+        == "retrieval"
+    )

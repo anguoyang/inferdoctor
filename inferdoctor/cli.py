@@ -47,6 +47,10 @@ from inferdoctor.core.cognitive_probes import (
     plan_next_cognitive_probe,
     render_probe_plan,
 )
+from inferdoctor.core.cognitive_replay import (
+    compare_controlled_replay,
+    render_replay_comparison,
+)
 from inferdoctor.core.dify_reliability import (
     render_reliability_report,
     run_dify_connectivity_check,
@@ -672,6 +676,57 @@ def _parser() -> argparse.ArgumentParser:
         default="console",
     )
     cognitive_probe_next.add_argument(
+        "--output",
+    )
+
+    cognitive_replay = cognitive_subparsers.add_parser(
+        "replay",
+        help="Compare a controlled cognitive replay with its baseline",
+    )
+    cognitive_replay_subparsers = cognitive_replay.add_subparsers(
+        dest="cognitive_replay_command",
+        required=True,
+    )
+
+    cognitive_replay_compare = cognitive_replay_subparsers.add_parser(
+        "compare",
+        help="Verify whether a Gold Probe moved the first broken layer downstream",
+    )
+    cognitive_replay_compare.add_argument(
+        "--case",
+        required=True,
+    )
+    cognitive_replay_compare.add_argument(
+        "--before",
+        required=True,
+    )
+    cognitive_replay_compare.add_argument(
+        "--after",
+        required=True,
+    )
+    cognitive_replay_compare.add_argument(
+        "--target-layer",
+        required=True,
+        choices=(
+            "intent",
+            "route",
+            "plan",
+            "action",
+            "retrieval",
+            "context",
+            "generation",
+            "postprocessing",
+        ),
+    )
+    cognitive_replay_compare.add_argument(
+        "--probe-name",
+    )
+    cognitive_replay_compare.add_argument(
+        "--format",
+        choices=("console", "json"),
+        default="console",
+    )
+    cognitive_replay_compare.add_argument(
         "--output",
     )
 
@@ -1509,6 +1564,60 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 )
 
                 return 0
+
+
+            if (
+                args.cognitive_command
+                == "replay"
+                and args.cognitive_replay_command
+                == "compare"
+            ):
+                result = compare_controlled_replay(
+                    load_cognitive_case(
+                        args.case
+                    ),
+                    load_cognitive_trace(
+                        args.before
+                    ),
+                    load_cognitive_trace(
+                        args.after
+                    ),
+                    target_layer=(
+                        args.target_layer
+                    ),
+                    probe_name=(
+                        args.probe_name
+                    ),
+                )
+
+                if args.format == "json":
+                    rendered = json.dumps(
+                        result,
+                        indent=2,
+                        sort_keys=True,
+                    )
+                else:
+                    rendered = (
+                        render_replay_comparison(
+                            result
+                        )
+                    )
+
+                _emit_output(
+                    rendered,
+                    args.output,
+                )
+
+                return (
+                    1
+                    if result["verdict"]
+                    in {
+                        "INVALID_BASELINE",
+                        "TARGET_NOT_ISOLATED",
+                        "REGRESSED",
+                    }
+                    else 0
+                )
 
         except (
             ValueError,
