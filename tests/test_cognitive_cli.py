@@ -485,3 +485,141 @@ def test_cognitive_replay_cli_json_output(
         ]
         == "retrieval"
     )
+
+
+
+def test_cognitive_gold_context_cli_wiring(
+    tmp_path,
+    monkeypatch,
+    capsys,
+):
+    case_path = (
+        tmp_path
+        / "cognitive-case.json"
+    )
+
+    trace_path = (
+        tmp_path
+        / "cognitive-trace.json"
+    )
+
+    rag_case_path = (
+        tmp_path
+        / "rag-case.json"
+    )
+
+    context_path = (
+        tmp_path
+        / "gold.txt"
+    )
+
+    case_path.write_text(
+        json.dumps({
+            "schema_version": (
+                COGNITIVE_CASE_SCHEMA_VERSION
+            ),
+            "case_id": "gold-cli",
+            "expected_intent": "refund",
+            "expected_route": (
+                "refund-route"
+            ),
+        }),
+        encoding="utf-8",
+    )
+
+    write_trace(
+        trace_path,
+        route="wrong-route",
+    )
+
+    rag_case_path.write_text(
+        "{}",
+        encoding="utf-8",
+    )
+
+    context_path.write_text(
+        "synthetic gold evidence",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        "inferdoctor.cli.load_case",
+        lambda path: {
+            "case_id": "rag-case"
+        },
+    )
+
+    calls = []
+
+    def fake_probe(
+        analysis,
+        rag_case,
+        **kwargs,
+    ):
+        calls.append({
+            "analysis": analysis,
+            "rag_case": rag_case,
+            "kwargs": kwargs,
+        })
+
+        return {
+            "verdict": "DRY_RUN",
+            "confidence": "none",
+            "baseline_first_broken_layer": (
+                "route"
+            ),
+            "diagnostic_effect": (
+                "NO_ATTRIBUTION_UPDATE"
+            ),
+            "conclusion": (
+                "Dry run only."
+            ),
+            "model_capability_interpretation": (
+                "No capability conclusion."
+            ),
+            "attribution_interpretation": (
+                "No attribution update."
+            ),
+            "causal_boundary": (
+                "Capability isolation only."
+            ),
+        }
+
+    monkeypatch.setattr(
+        "inferdoctor.cli.run_cognitive_gold_context_probe",
+        fake_probe,
+    )
+
+    code = main([
+        "cognitive",
+        "probe",
+        "gold-context",
+        "--cognitive-case",
+        str(case_path),
+        "--cognitive-trace",
+        str(trace_path),
+        "--rag-case",
+        str(rag_case_path),
+        "--context-file",
+        str(context_path),
+        "--endpoint",
+        "http://127.0.0.1:8000/v1",
+        "--model",
+        "local-model",
+        "--dry-run",
+    ])
+
+    assert code == 0
+    assert len(calls) == 1
+
+    assert (
+        calls[0]["kwargs"][
+            "context_text"
+        ]
+        == "synthetic gold evidence"
+    )
+
+    assert (
+        "Cognitive Gold Context Probe"
+        in capsys.readouterr().out
+    )

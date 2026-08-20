@@ -128,3 +128,12 @@ Compare a baseline trace with a controlled Gold Probe replay:
 JSON output:
 
 `inferdoctor cognitive replay compare --case case.json --before before.json --after after.json --target-layer route --probe-name gold_route --format json --output replay.json`
+
+
+### Executable Gold Context probe
+
+InferDoctor can reuse the existing RAG Gold Context Probe from a Cognitive diagnosis:
+
+`inferdoctor cognitive probe gold-context --cognitive-case cognitive-case.json --cognitive-trace cognitive-trace.json --rag-case rag-case.json --context-file gold.txt --endpoint http://127.0.0.1:8000/v1 --model MODEL`
+
+Gold Context is a capability-isolation probe, not a strict one-variable replay. It supplies known-good context together with explicit grounding and therefore must not be used to claim that retrieval alone was the unique cause.

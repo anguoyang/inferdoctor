@@ -51,6 +51,10 @@ from inferdoctor.core.cognitive_replay import (
     compare_controlled_replay,
     render_replay_comparison,
 )
+from inferdoctor.core.cognitive_gold import (
+    render_cognitive_gold_context,
+    run_cognitive_gold_context_probe,
+)
 from inferdoctor.core.dify_reliability import (
     render_reliability_report,
     run_dify_connectivity_check,
@@ -676,6 +680,67 @@ def _parser() -> argparse.ArgumentParser:
         default="console",
     )
     cognitive_probe_next.add_argument(
+        "--output",
+    )
+
+    cognitive_gold_context = cognitive_probe_subparsers.add_parser(
+        "gold-context",
+        help="Run Gold Context capability isolation from a Cognitive baseline",
+    )
+    cognitive_gold_context.add_argument(
+        "--cognitive-case",
+        required=True,
+    )
+    cognitive_gold_context.add_argument(
+        "--cognitive-trace",
+        required=True,
+    )
+    cognitive_gold_context.add_argument(
+        "--rag-case",
+        required=True,
+    )
+    cognitive_gold_context.add_argument(
+        "--context-file",
+        required=True,
+    )
+    cognitive_gold_context.add_argument(
+        "--endpoint",
+        required=True,
+    )
+    cognitive_gold_context.add_argument(
+        "--model",
+        required=True,
+    )
+    cognitive_gold_context.add_argument(
+        "--api-key-env",
+    )
+    cognitive_gold_context.add_argument(
+        "--timeout",
+        type=_positive_float,
+        default=30.0,
+    )
+    cognitive_gold_context.add_argument(
+        "--dry-run",
+        action="store_true",
+    )
+    cognitive_gold_context.add_argument(
+        "--allow-non-local",
+        action="store_true",
+    )
+    cognitive_gold_context.add_argument(
+        "--allow-public",
+        action="store_true",
+    )
+    cognitive_gold_context.add_argument(
+        "--retain-answer",
+        action="store_true",
+    )
+    cognitive_gold_context.add_argument(
+        "--format",
+        choices=("console", "json"),
+        default="console",
+    )
+    cognitive_gold_context.add_argument(
         "--output",
     )
 
@@ -1565,6 +1630,87 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
                 return 0
 
+
+            if (
+                args.cognitive_command
+                == "probe"
+                and args.cognitive_probe_command
+                == "gold-context"
+            ):
+                cognitive_analysis = (
+                    evaluate_cognitive_case(
+                        load_cognitive_case(
+                            args.cognitive_case
+                        ),
+                        load_cognitive_trace(
+                            args.cognitive_trace
+                        ),
+                    )
+                )
+
+                rag_case = load_case(
+                    args.rag_case
+                )
+
+                context_text = Path(
+                    args.context_file
+                ).read_text(
+                    encoding="utf-8"
+                )
+
+                api_key = None
+
+                if args.api_key_env:
+                    import os
+
+                    api_key = os.environ.get(
+                        args.api_key_env
+                    )
+
+                result = (
+                    run_cognitive_gold_context_probe(
+                        cognitive_analysis,
+                        rag_case,
+                        context_text=context_text,
+                        endpoint=args.endpoint,
+                        model=args.model,
+                        timeout=args.timeout,
+                        dry_run=args.dry_run,
+                        allow_non_local=args.allow_non_local,
+                        allow_public=args.allow_public,
+                        api_key=api_key,
+                        retain_answer=args.retain_answer,
+                    )
+                )
+
+                if args.format == "json":
+                    rendered = json.dumps(
+                        result,
+                        indent=2,
+                        sort_keys=True,
+                        ensure_ascii=False,
+                    )
+                else:
+                    rendered = (
+                        render_cognitive_gold_context(
+                            result
+                        )
+                    )
+
+                _emit_output(
+                    rendered,
+                    args.output,
+                )
+
+                return (
+                    1
+                    if result["verdict"]
+                    in {
+                        "GOLD_CONTEXT_FAIL",
+                        "PROBE_FAILED",
+                    }
+                    else 0
+                )
 
             if (
                 args.cognitive_command
