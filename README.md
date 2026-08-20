@@ -150,6 +150,20 @@ InferDoctor development now includes a framework-neutral RAG Intelligence Doctor
 
 Docs: [RAG Intelligence Doctor](https://github.com/anguoyang/inferdoctor/blob/main/docs/rag/README.md)
 
+## Provider Foundation
+
+Provider presets are metadata layered over one shared OpenAI-compatible transport. Provider Check measures connectivity, authentication, and model-list evidence without turning InferDoctor into a router or provider SDK.
+
+```bash
+inferdoctor provider list
+inferdoctor provider show orcarouter
+inferdoctor provider check --provider orcarouter --allow-public
+```
+
+The default check sends only an authenticated `GET /models`. A real chat request requires explicit `--smoke`; response content is not retained. Missing evidence remains `UNKNOWN`, including unsupported `/models`, TTFT, pricing, and total compute cost. API keys are read from provider-specific environment variables and never reported. Partner metadata never affects diagnosis or recommendations.
+
+Docs: [Provider Foundation and Provider Check](https://github.com/anguoyang/inferdoctor/blob/main/docs/providers.md)
+
 ## Language Support
 
 InferDoctor includes first-step localization for the health dashboard and `inferdoctor check` console summary.

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 from typing import List, Optional, Sequence, Tuple
@@ -86,6 +87,16 @@ from inferdoctor.core.optimize import advise_endpoint, advise_rag, render_optimi
 from inferdoctor.core.optimization_plan import build_optimization_plan, render_optimization_plan
 from inferdoctor.core.models import CheckResult, Status
 from inferdoctor.core.profile import render_profile_json, render_profile_markdown
+from inferdoctor.core.providers import (
+    ProviderError,
+    get_provider_preset,
+    list_provider_presets,
+    provider_ids,
+    render_provider_check,
+    render_provider_list,
+    render_provider_show,
+    run_provider_check,
+)
 from inferdoctor.core.perf import render_perf_json, render_perf_markdown, render_perf_result, run_endpoint_smoke, run_streaming_smoke
 from inferdoctor.core.perf_baseline import (
     create_baseline_from_report_file,
@@ -263,6 +274,56 @@ def _parser() -> argparse.ArgumentParser:
         help="Override the selected service endpoint for this check",
     )
     _add_runtime_options(check)
+
+    provider = subparsers.add_parser(
+        "provider",
+        help="Inspect provider presets and run bounded provider checks",
+        description="Provider-neutral OpenAI-compatible metadata and evidence-driven checks.",
+    )
+    provider_subparsers = provider.add_subparsers(
+        dest="provider_command",
+        required=True,
+    )
+    provider_subparsers.add_parser(
+        "list",
+        help="List built-in provider presets",
+    )
+    provider_show = provider_subparsers.add_parser(
+        "show",
+        help="Show one provider preset",
+    )
+    provider_show.add_argument("provider", choices=provider_ids())
+    provider_check = provider_subparsers.add_parser(
+        "check",
+        help="Run a bounded provider connectivity/auth/model check",
+    )
+    provider_check.add_argument(
+        "--provider",
+        required=True,
+        choices=provider_ids(),
+    )
+    provider_check.add_argument(
+        "--timeout",
+        type=_positive_float,
+        default=10.0,
+    )
+    provider_check.add_argument(
+        "--model",
+        help="Override the provider preset's default model",
+    )
+    provider_check.add_argument(
+        "--smoke",
+        action="store_true",
+        help="Opt in to one minimal chat request; response content is not retained",
+    )
+    provider_check.add_argument("--allow-non-local", action="store_true")
+    provider_check.add_argument("--allow-public", action="store_true")
+    provider_check.add_argument(
+        "--format",
+        choices=("console", "json"),
+        default="console",
+    )
+    provider_check.add_argument("--output")
 
     model = subparsers.add_parser(
         "model",
@@ -1383,6 +1444,32 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if args.command == "explain":
         print(render_explanation(args.topic))
         return 0
+    if args.command == "provider":
+        try:
+            if args.provider_command == "list":
+                print(render_provider_list(list_provider_presets()))
+                return 0
+            provider = get_provider_preset(args.provider)
+            if args.provider_command == "show":
+                print(render_provider_show(provider))
+                return 0
+            result = run_provider_check(
+                provider,
+                api_key=os.environ.get(provider.api_key_env),
+                timeout=args.timeout,
+                allow_non_local=args.allow_non_local,
+                allow_public=args.allow_public,
+                smoke=args.smoke,
+                model=args.model,
+            )
+            _emit_output(
+                render_provider_check(result, args.format),
+                args.output,
+            )
+            return 1 if result.get("status") == "FAIL" else 0
+        except ProviderError as exc:
+            print("inferdoctor: {0}".format(exc), file=sys.stderr)
+            return 2
     if args.command == "experience":
         if args.experience_command == "profile":
             print(render_experience_profile(get_profile(args.name)))
@@ -1729,7 +1816,6 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 api_key = None
 
                 if args.api_key_env:
-                    import os
 
                     api_key = os.environ.get(
                         args.api_key_env
@@ -1810,7 +1896,6 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 api_key = None
 
                 if args.api_key_env:
-                    import os
 
                     api_key = os.environ.get(
                         args.api_key_env
@@ -1994,7 +2079,6 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             if args.rag_command == "probe" and args.rag_probe_command == "gold-context":
                 api_key = None
                 if args.api_key_env:
-                    import os
                     api_key = os.environ.get(args.api_key_env)
                 context_text = Path(args.context_file).read_text(encoding="utf-8")
                 result = run_gold_context_probe(load_case(args.case), context_text=context_text, endpoint=args.endpoint, model=args.model, timeout=args.timeout, dry_run=args.dry_run, allow_non_local=args.allow_non_local, allow_public=args.allow_public, api_key=api_key, retain_answer=args.retain_answer)

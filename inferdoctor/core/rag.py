@@ -5,15 +5,18 @@ import json
 import re
 import time
 import unicodedata
-import urllib.error
 import urllib.parse
-import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from inferdoctor import __version__
 from inferdoctor.core.endpoint_safety import classify_endpoint, redact_endpoint
+from inferdoctor.core.openai_compatible import (
+    OpenAICompatibleTransportError,
+    create_chat_completion,
+    extract_chat_text,
+)
 
 RAG_CASE_SCHEMA_VERSION = "inferdoctor.rag.case.v1"
 RAG_TRACE_SCHEMA_VERSION = "inferdoctor.rag.trace.v1"
@@ -2545,19 +2548,28 @@ def run_gold_context_probe(case: Dict[str, Any], *, context_text: str, endpoint:
     }
     if dry_run:
         return result
-    body = json.dumps({"model": model, "messages": payload_info["messages"], "stream": False, "max_tokens": 256}).encode("utf-8")
-    headers = {"Content-Type": "application/json", "Accept": "application/json", "User-Agent": f"InferDoctor/{__version__}"}
-    if api_key:
-        headers["Authorization"] = f"Bearer {api_key}"
+    payload = {
+        "model": model,
+        "messages": payload_info["messages"],
+        "stream": False,
+        "max_tokens": 256,
+    }
     started = time.perf_counter()
     try:
-        request = urllib.request.Request(endpoint.rstrip("/") + "/chat/completions", data=body, method="POST", headers=headers)
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            data = response.read(1024 * 1024 + 1)
-            if len(data) > 1024 * 1024:
-                raise RagError("gold-context probe response exceeded 1 MiB")
-            parsed = json.loads(data.decode("utf-8"))
-        elapsed = int((time.perf_counter() - started) * 1000)
+        response = create_chat_completion(
+            endpoint,
+            payload=payload,
+            timeout=timeout,
+            api_key=api_key,
+        )
+        if not 200 <= response.status < 300:
+            raise RagError(
+                "gold-context probe returned HTTP {0}".format(response.status)
+            )
+        if not response.json_valid:
+            raise RagError("gold-context probe returned invalid JSON")
+        parsed = response.json_data
+        elapsed = response.elapsed_ms
         answer = _extract_chat_answer(parsed)
         evaluation = _gold_probe_evaluation(answer, case)
         result.update(evaluation)
@@ -2572,7 +2584,7 @@ def run_gold_context_probe(case: Dict[str, Any], *, context_text: str, endpoint:
             "answer_evaluated_in_memory": True,
         })
         return result
-    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, RagError) as exc:
+    except (OpenAICompatibleTransportError, json.JSONDecodeError, RagError) as exc:
         result.update({
             "request_sent": True,
             "request_status": "sent",
@@ -2589,18 +2601,7 @@ def run_gold_context_probe(case: Dict[str, Any], *, context_text: str, endpoint:
 
 
 def _extract_chat_answer(parsed: Any) -> str:
-    if not isinstance(parsed, dict):
-        return ""
-    choices = parsed.get("choices")
-    if isinstance(choices, list) and choices:
-        first = choices[0]
-        if isinstance(first, dict):
-            message = first.get("message")
-            if isinstance(message, dict) and isinstance(message.get("content"), str):
-                return message["content"]
-            if isinstance(first.get("text"), str):
-                return first["text"]
-    return ""
+    return extract_chat_text(parsed)
 
 
 def render_rag_result(result: Dict[str, Any], output_format: str = "console") -> str:
