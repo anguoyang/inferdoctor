@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -203,7 +204,13 @@ class DifyAPIClient:
     def get_info(self) -> Dict[str, Any]:
         return self.request_json("GET", "/info")
 
-    def stream_request(self, path: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    def stream_request(
+        self,
+        path: str,
+        payload: Dict[str, Any],
+        *,
+        capture_trace_events: bool = False,
+    ) -> Dict[str, Any]:
         request = urllib.request.Request(self._url(path), data=json.dumps(payload).encode("utf-8"), method="POST", headers=self._headers())
         started = time.perf_counter()
         lines: List[bytes] = []
@@ -262,17 +269,70 @@ class DifyAPIClient:
         metrics["first_event_latency_seconds"] = round(first_event_at - started, 6) if first_event_at is not None else None
         metrics["ttft_seconds"] = round(first_text_at - started, 6) if first_text_at is not None else None
         metrics["content_type"] = content_type
+
+        if capture_trace_events:
+            metrics["trace_events"] = (
+                summarize_dify_trace_events(
+                    events
+                )
+            )
+            metrics[
+                "trace_event_capture"
+            ] = "safe_metadata"
+        else:
+            metrics["trace_events"] = None
+            metrics[
+                "trace_event_capture"
+            ] = "disabled"
+
         return metrics
 
-    def run_chat_stream(self, query: str, *, user: str, show_answer: bool = False) -> Dict[str, Any]:
-        result = self.stream_request("/chat-messages", {"query": query, "inputs": {}, "response_mode": "streaming", "user": user})
+    def run_chat_stream(
+        self,
+        query: str,
+        *,
+        user: str,
+        show_answer: bool = False,
+        capture_trace_events: bool = False,
+    ) -> Dict[str, Any]:
+        result = self.stream_request(
+            "/chat-messages",
+            {
+                "query": query,
+                "inputs": {},
+                "response_mode": "streaming",
+                "user": user,
+            },
+            capture_trace_events=(
+                capture_trace_events
+            ),
+        )
         if not show_answer:
             result["answer_preview"] = None
             result["answer_retained"] = False
         return result
 
-    def run_workflow_stream(self, query: str, *, user: str, show_answer: bool = False) -> Dict[str, Any]:
-        result = self.stream_request("/workflows/run", {"inputs": {"query": query}, "response_mode": "streaming", "user": user})
+    def run_workflow_stream(
+        self,
+        query: str,
+        *,
+        user: str,
+        show_answer: bool = False,
+        capture_trace_events: bool = False,
+    ) -> Dict[str, Any]:
+        result = self.stream_request(
+            "/workflows/run",
+            {
+                "inputs": {
+                    "query": query,
+                },
+                "response_mode": "streaming",
+                "user": user,
+            },
+            capture_trace_events=(
+                capture_trace_events
+            ),
+        )
         if not show_answer:
             result["answer_preview"] = None
             result["answer_retained"] = False
@@ -393,6 +453,420 @@ def _visible_text(payload: Any) -> str:
     data = payload.get("data")
     return _visible_text(data) if isinstance(data, dict) else ""
 
+
+
+def _trace_hash_text(
+    value: Any,
+) -> Optional[str]:
+    if not isinstance(value, str):
+        return None
+
+    if not value:
+        return None
+
+    return hashlib.sha256(
+        value.encode("utf-8")
+    ).hexdigest()
+
+
+def _trace_mapping_keys(
+    value: Any,
+) -> List[str]:
+    if not isinstance(value, dict):
+        return []
+
+    return sorted(
+        str(key)
+        for key in value.keys()
+    )[:64]
+
+
+def _safe_retriever_resource(
+    resource: Dict[str, Any],
+    fallback_rank: int,
+) -> Dict[str, Any]:
+    position = resource.get("position")
+
+    rank = (
+        position
+        if (
+            isinstance(position, int)
+            and position > 0
+        )
+        else fallback_rank
+    )
+
+    item: Dict[str, Any] = {
+        "rank": rank,
+    }
+
+    for key in (
+        "dataset_id",
+        "document_id",
+        "segment_id",
+        "retriever_from",
+        "index_node_hash",
+    ):
+        value = resource.get(key)
+
+        if isinstance(value, str) and value:
+            item[key] = value
+
+    for key in (
+        "score",
+        "hit_count",
+        "word_count",
+        "segment_position",
+        "page",
+    ):
+        value = resource.get(key)
+
+        if isinstance(
+            value,
+            (int, float),
+        ) and not isinstance(
+            value,
+            bool,
+        ):
+            item[key] = value
+
+    content = resource.get("content")
+
+    if isinstance(content, str):
+        item["content_length"] = len(
+            content
+        )
+
+        if content:
+            item["content_sha256"] = (
+                _trace_hash_text(content)
+            )
+
+    for key in (
+        "document_name",
+        "dataset_name",
+        "title",
+        "summary",
+    ):
+        value = resource.get(key)
+
+        if isinstance(value, str) and value:
+            item[
+                key + "_sha256"
+            ] = _trace_hash_text(value)
+
+            item[
+                key + "_length"
+            ] = len(value)
+
+    return item
+
+
+def summarize_dify_trace_events(
+    events: Sequence[Dict[str, Any]],
+    *,
+    limit: int = 200,
+) -> List[Dict[str, Any]]:
+    summaries: List[
+        Dict[str, Any]
+    ] = []
+
+    for event in events[:limit]:
+        if not isinstance(event, dict):
+            continue
+
+        payload = event.get("json")
+
+        if not isinstance(payload, dict):
+            payload = {}
+
+        event_type = (
+            event.get("event")
+            or payload.get("event")
+            or "unknown"
+        )
+
+        summary: Dict[str, Any] = {
+            "event": str(event_type),
+        }
+
+        for key in (
+            "task_id",
+            "workflow_run_id",
+            "id",
+        ):
+            value = payload.get(key)
+
+            if isinstance(value, str) and value:
+                summary[key] = value
+
+        data = payload.get("data")
+
+        if not isinstance(data, dict):
+            data = {}
+
+        if event_type in {
+            "node_started",
+            "node_finished",
+            "node_retry",
+        }:
+            safe_data: Dict[str, Any] = {}
+
+            for key in (
+                "node_id",
+                "node_type",
+                "predecessor_node_id",
+                "status",
+                "iteration_id",
+                "loop_id",
+            ):
+                value = data.get(key)
+
+                if isinstance(
+                    value,
+                    str,
+                ) and value:
+                    safe_data[key] = value
+
+            for key in (
+                "index",
+                "elapsed_time",
+                "created_at",
+                "finished_at",
+                "retry_index",
+            ):
+                value = data.get(key)
+
+                if isinstance(
+                    value,
+                    (int, float),
+                ) and not isinstance(
+                    value,
+                    bool,
+                ):
+                    safe_data[key] = value
+
+            for key in (
+                "inputs_truncated",
+                "process_data_truncated",
+                "outputs_truncated",
+            ):
+                value = data.get(key)
+
+                if isinstance(value, bool):
+                    safe_data[key] = value
+
+            title = data.get("title")
+
+            if isinstance(title, str):
+                safe_data[
+                    "title_length"
+                ] = len(title)
+
+                if title:
+                    safe_data[
+                        "title_sha256"
+                    ] = _trace_hash_text(
+                        title
+                    )
+
+            safe_data["input_keys"] = (
+                _trace_mapping_keys(
+                    data.get("inputs")
+                )
+            )
+
+            safe_data[
+                "process_data_keys"
+            ] = _trace_mapping_keys(
+                data.get(
+                    "process_data"
+                )
+            )
+
+            safe_data["output_keys"] = (
+                _trace_mapping_keys(
+                    data.get("outputs")
+                )
+            )
+
+            error = data.get("error")
+
+            if isinstance(error, str):
+                safe_data[
+                    "error_present"
+                ] = bool(error)
+
+                if error:
+                    safe_data[
+                        "error_sha256"
+                    ] = _trace_hash_text(
+                        error
+                    )
+
+            summary["data"] = safe_data
+
+        elif event_type == "agent_thought":
+            position = payload.get(
+                "position"
+            )
+
+            if isinstance(position, int):
+                summary[
+                    "position"
+                ] = position
+
+            tool = payload.get("tool")
+
+            if isinstance(tool, str) and tool:
+                summary["tool"] = tool
+
+            for key in (
+                "thought",
+                "observation",
+                "tool_input",
+            ):
+                value = payload.get(key)
+
+                if isinstance(value, str):
+                    summary[
+                        key + "_present"
+                    ] = bool(value)
+
+                    summary[
+                        key + "_length"
+                    ] = len(value)
+
+                    if value:
+                        summary[
+                            key + "_sha256"
+                        ] = _trace_hash_text(
+                            value
+                        )
+
+        elif event_type in {
+            "workflow_started",
+            "workflow_finished",
+            "workflow_paused",
+        }:
+            safe_data = {}
+
+            for key in (
+                "id",
+                "workflow_id",
+                "status",
+                "reason",
+            ):
+                value = data.get(key)
+
+                if isinstance(
+                    value,
+                    str,
+                ) and value:
+                    safe_data[key] = value
+
+            for key in (
+                "elapsed_time",
+                "total_tokens",
+                "total_steps",
+                "created_at",
+                "finished_at",
+            ):
+                value = data.get(key)
+
+                if isinstance(
+                    value,
+                    (int, float),
+                ) and not isinstance(
+                    value,
+                    bool,
+                ):
+                    safe_data[key] = value
+
+            safe_data["input_keys"] = (
+                _trace_mapping_keys(
+                    data.get("inputs")
+                )
+            )
+
+            safe_data["output_keys"] = (
+                _trace_mapping_keys(
+                    data.get("outputs")
+                )
+            )
+
+            summary["data"] = safe_data
+
+        elif event_type == "message_end":
+            metadata = payload.get(
+                "metadata"
+            )
+
+            if not isinstance(
+                metadata,
+                dict,
+            ):
+                metadata = {}
+
+            resources = metadata.get(
+                "retriever_resources"
+            )
+
+            if isinstance(resources, list):
+                safe_resources = []
+
+                for index, resource in enumerate(
+                    resources,
+                    start=1,
+                ):
+                    if not isinstance(
+                        resource,
+                        dict,
+                    ):
+                        continue
+
+                    safe_resources.append(
+                        _safe_retriever_resource(
+                            resource,
+                            index,
+                        )
+                    )
+
+                summary[
+                    "retriever_resources"
+                ] = safe_resources
+
+            usage = metadata.get("usage")
+
+            if isinstance(usage, dict):
+                safe_usage = {}
+
+                for key in (
+                    "prompt_tokens",
+                    "completion_tokens",
+                    "total_tokens",
+                    "total_price",
+                    "currency",
+                ):
+                    value = usage.get(key)
+
+                    if isinstance(
+                        value,
+                        (int, float, str),
+                    ) and not isinstance(
+                        value,
+                        bool,
+                    ):
+                        safe_usage[key] = value
+
+                if safe_usage:
+                    summary[
+                        "usage"
+                    ] = safe_usage
+
+        summaries.append(summary)
+
+    return summaries
 
 def interpret_dify_events(events: Sequence[Dict[str, Any]], *, started_at: float = 0.0, ended_at: Optional[float] = None) -> Dict[str, Any]:
     first_event: Optional[int] = None

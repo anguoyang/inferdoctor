@@ -6,6 +6,7 @@ import pytest
 from inferdoctor.cli import main
 from inferdoctor.core.dify import (
     DIFY_PERF_SCHEMA_VERSION,
+    DifyAPIClient,
     DifyConfig,
     export_dify_template,
     interpret_dify_events,
@@ -15,6 +16,7 @@ from inferdoctor.core.dify import (
     run_dify_knowledge_check,
     run_dify_perf,
     run_dify_smoke,
+    summarize_dify_trace_events,
     validate_dify_kit,
 )
 from inferdoctor.core.perf_baseline import baseline_from_report
@@ -300,4 +302,202 @@ def test_sanitized_current_dify_fixture_validates():
     assert result["status"] == "WARN"
     assert result["validation_level"] == "current_dify_structural_compatibility_validated"
     assert any("Knowledge dataset is unresolved" in item for item in result["warnings"])
+
+
+def test_dify_trace_event_summary_suppresses_private_content():
+    events = [
+        {
+            "event": "node_finished",
+            "json": {
+                "event": "node_finished",
+                "task_id": "task-1",
+                "workflow_run_id": "run-1",
+                "data": {
+                    "node_id": "node-1",
+                    "node_type": "question-classifier",
+                    "title": "SECRET NODE TITLE",
+                    "index": 1,
+                    "predecessor_node_id": "start",
+                    "inputs": {
+                        "query": "SECRET USER QUERY",
+                    },
+                    "process_data": {
+                        "classification": "SECRET CLASS",
+                    },
+                    "outputs": {
+                        "result": "SECRET OUTPUT",
+                    },
+                    "status": "succeeded",
+                    "elapsed_time": 0.25,
+                    "inputs_truncated": False,
+                    "process_data_truncated": False,
+                    "outputs_truncated": False,
+                },
+            },
+        },
+        {
+            "event": "agent_thought",
+            "json": {
+                "event": "agent_thought",
+                "task_id": "task-1",
+                "position": 1,
+                "thought": "SECRET THOUGHT",
+                "observation": "SECRET OBSERVATION",
+                "tool": "crm_lookup",
+                "tool_input": "SECRET TOOL INPUT",
+            },
+        },
+        {
+            "event": "message_end",
+            "json": {
+                "event": "message_end",
+                "task_id": "task-1",
+                "id": "message-1",
+                "metadata": {
+                    "retriever_resources": [
+                        {
+                            "position": 1,
+                            "dataset_id": "dataset-1",
+                            "document_id": "document-1",
+                            "document_name": "SECRET DOCUMENT NAME",
+                            "segment_id": "segment-1",
+                            "score": 0.93,
+                            "content": "SECRET RETRIEVED CONTENT",
+                        }
+                    ],
+                    "usage": {
+                        "prompt_tokens": 100,
+                        "completion_tokens": 20,
+                        "total_tokens": 120,
+                    },
+                },
+            },
+        },
+    ]
+
+    result = summarize_dify_trace_events(
+        events
+    )
+
+    dumped = json.dumps(
+        result,
+        ensure_ascii=False,
+    )
+
+    for secret in (
+        "SECRET NODE TITLE",
+        "SECRET USER QUERY",
+        "SECRET CLASS",
+        "SECRET OUTPUT",
+        "SECRET THOUGHT",
+        "SECRET OBSERVATION",
+        "SECRET TOOL INPUT",
+        "SECRET DOCUMENT NAME",
+        "SECRET RETRIEVED CONTENT",
+    ):
+        assert secret not in dumped
+
+    node = result[0]
+
+    assert (
+        node["data"]["node_type"]
+        == "question-classifier"
+    )
+
+    assert node["data"]["input_keys"] == [
+        "query"
+    ]
+
+    assert node["data"]["output_keys"] == [
+        "result"
+    ]
+
+    assert node["data"]["title_sha256"]
+
+    agent = result[1]
+
+    assert agent["tool"] == "crm_lookup"
+    assert (
+        agent["thought_present"]
+        is True
+    )
+    assert (
+        agent["tool_input_present"]
+        is True
+    )
+
+    resource = result[2][
+        "retriever_resources"
+    ][0]
+
+    assert (
+        resource["document_id"]
+        == "document-1"
+    )
+    assert (
+        resource["segment_id"]
+        == "segment-1"
+    )
+    assert resource["score"] == 0.93
+
+    assert resource[
+        "content_sha256"
+    ]
+
+    assert (
+        resource[
+            "document_name_sha256"
+        ]
+    )
+
+
+def test_dify_stream_wrappers_forward_trace_capture_flag():
+    class CaptureClient(
+        DifyAPIClient
+    ):
+        def stream_request(
+            self,
+            path,
+            payload,
+            *,
+            capture_trace_events=False,
+        ):
+            return {
+                "path": path,
+                "capture": (
+                    capture_trace_events
+                ),
+                "errors": [],
+                "answer_preview": None,
+                "answer_retained": False,
+            }
+
+    client = CaptureClient(
+        "http://127.0.0.1:5001/v1"
+    )
+
+    chat = client.run_chat_stream(
+        "hello",
+        user="u",
+        capture_trace_events=True,
+    )
+
+    workflow = client.run_workflow_stream(
+        "hello",
+        user="u",
+        capture_trace_events=True,
+    )
+
+    assert chat["capture"] is True
+    assert workflow["capture"] is True
+
+    assert (
+        chat["path"]
+        == "/chat-messages"
+    )
+
+    assert (
+        workflow["path"]
+        == "/workflows/run"
+    )
 
