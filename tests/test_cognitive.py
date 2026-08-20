@@ -294,3 +294,112 @@ def test_console_explains_execution_vs_semantics():
         "Semantic first broken layer: not established"
         in rendered
     )
+
+
+def test_dify_projection_preserves_safe_semantic_evidence():
+    events = [
+        {
+            "event": "node_finished",
+            "data": {
+                "node_id": "intent",
+                "node_type": (
+                    "question-classifier"
+                ),
+                "status": "succeeded",
+                "decision_kind": (
+                    "class_id"
+                ),
+                "decision_sha256": (
+                    "intent-hash"
+                ),
+            },
+        },
+        {
+            "event": "node_finished",
+            "data": {
+                "node_id": "route",
+                "node_type": "if-else",
+                "status": "succeeded",
+                "decision_kind": (
+                    "selected_case_id"
+                ),
+                "decision_sha256": (
+                    "route-hash"
+                ),
+            },
+        },
+        {
+            "event": "message_end",
+            "retriever_resources": [
+                {
+                    "document_id": (
+                        "doc-policy"
+                    ),
+                    "segment_id": (
+                        "segment-1"
+                    ),
+                },
+                {
+                    "document_id": (
+                        "doc-other"
+                    ),
+                    "segment_id": (
+                        "segment-2"
+                    ),
+                },
+            ],
+        },
+    ]
+
+    trace = (
+        project_dify_cognitive_trace(
+            events
+        )
+    )
+
+    intent = next(
+        item
+        for item
+        in trace["observations"]
+        if item["layer"] == "intent"
+    )
+
+    route = next(
+        item
+        for item
+        in trace["observations"]
+        if item["layer"] == "route"
+    )
+
+    retrieval = next(
+        item
+        for item
+        in trace["observations"]
+        if item["layer"] == "retrieval"
+    )
+
+    assert (
+        intent["decision_sha256"]
+        == "intent-hash"
+    )
+
+    assert (
+        route["decision_sha256"]
+        == "route-hash"
+    )
+
+    assert (
+        retrieval["source_ids"]
+        == [
+            "doc-other",
+            "doc-policy",
+        ]
+    )
+
+    assert (
+        retrieval["segment_ids"]
+        == [
+            "segment-1",
+            "segment-2",
+        ]
+    )

@@ -684,11 +684,60 @@ def summarize_dify_trace_events(
                 )
             )
 
+            outputs = data.get("outputs")
+
             safe_data["output_keys"] = (
                 _trace_mapping_keys(
-                    data.get("outputs")
+                    outputs
                 )
             )
+
+            node_type = safe_data.get(
+                "node_type"
+            )
+
+            if isinstance(outputs, dict):
+                decision = None
+                decision_kind = None
+
+                if (
+                    node_type
+                    == "question-classifier"
+                ):
+                    decision = outputs.get(
+                        "class_id"
+                    )
+                    decision_kind = (
+                        "class_id"
+                    )
+
+                elif (
+                    node_type
+                    == "if-else"
+                ):
+                    decision = outputs.get(
+                        "selected_case_id"
+                    )
+                    decision_kind = (
+                        "selected_case_id"
+                    )
+
+                if (
+                    isinstance(
+                        decision,
+                        str,
+                    )
+                    and decision
+                ):
+                    safe_data[
+                        "decision_kind"
+                    ] = decision_kind
+
+                    safe_data[
+                        "decision_sha256"
+                    ] = _trace_hash_text(
+                        decision
+                    )
 
             error = data.get("error")
 

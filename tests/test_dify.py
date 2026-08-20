@@ -501,3 +501,89 @@ def test_dify_stream_wrappers_forward_trace_capture_flag():
         == "/workflows/run"
     )
 
+
+
+def test_dify_safe_summary_hashes_classifier_and_route_decisions():
+    events = [
+        {
+            "event": "node_finished",
+            "json": {
+                "event": "node_finished",
+                "data": {
+                    "node_id": "intent",
+                    "node_type": (
+                        "question-classifier"
+                    ),
+                    "status": "succeeded",
+                    "outputs": {
+                        "class_id": (
+                            "private-intent-id"
+                        )
+                    },
+                },
+            },
+        },
+        {
+            "event": "node_finished",
+            "json": {
+                "event": "node_finished",
+                "data": {
+                    "node_id": "route",
+                    "node_type": "if-else",
+                    "status": "succeeded",
+                    "outputs": {
+                        "selected_case_id": (
+                            "private-route-id"
+                        )
+                    },
+                },
+            },
+        },
+    ]
+
+    result = (
+        summarize_dify_trace_events(
+            events
+        )
+    )
+
+    dumped = json.dumps(
+        result,
+        ensure_ascii=False,
+    )
+
+    assert (
+        "private-intent-id"
+        not in dumped
+    )
+
+    assert (
+        "private-route-id"
+        not in dumped
+    )
+
+    intent = result[0]["data"]
+    route = result[1]["data"]
+
+    assert (
+        intent["decision_kind"]
+        == "class_id"
+    )
+
+    assert (
+        intent["decision_sha256"]
+    )
+
+    assert (
+        route["decision_kind"]
+        == "selected_case_id"
+    )
+
+    assert (
+        route["decision_sha256"]
+    )
+
+    assert (
+        intent["decision_sha256"]
+        != route["decision_sha256"]
+    )

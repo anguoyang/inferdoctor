@@ -287,12 +287,30 @@ def render_cognitive_analysis(
             )
         )
 
-        marker = (
-            "  <-- FIRST EXECUTION FAILURE"
-            if (
-                name
-                == first_execution_failure
+        markers = []
+
+        if (
+            name
+            == first_execution_failure
+        ):
+            markers.append(
+                "FIRST EXECUTION FAILURE"
             )
+
+        if (
+            layer.get(
+                "semantic_role"
+            )
+            == "FIRST_BROKEN"
+        ):
+            markers.append(
+                "FIRST SEMANTIC BROKEN"
+            )
+
+        marker = (
+            "  <-- "
+            + ", ".join(markers)
+            if markers
             else ""
         )
 
@@ -305,11 +323,15 @@ def render_cognitive_analysis(
             )
         )
 
+    first_broken = analysis.get(
+        "first_broken_layer"
+    )
+
     lines.extend([
         "",
-        (
-            "Semantic first broken layer: "
-            "not established"
+        "Semantic first broken layer: {0}".format(
+            first_broken
+            or "not established"
         ),
         (
             "Note: a node that executed "

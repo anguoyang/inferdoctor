@@ -96,6 +96,18 @@ def _node_observation(
     }
 
     for key in (
+        "decision_kind",
+        "decision_sha256",
+    ):
+        value = data.get(key)
+
+        if (
+            isinstance(value, str)
+            and value
+        ):
+            observation[key] = value
+
+    for key in (
         "node_id",
         "predecessor_node_id",
         "iteration_id",
@@ -240,6 +252,44 @@ def project_dify_cognitive_trace(
                 resources,
                 list,
             ):
+                source_ids = sorted({
+                    str(
+                        resource.get(
+                            "document_id"
+                        )
+                    )
+                    for resource
+                    in resources
+                    if (
+                        isinstance(
+                            resource,
+                            dict,
+                        )
+                        and resource.get(
+                            "document_id"
+                        )
+                    )
+                })
+
+                segment_ids = sorted({
+                    str(
+                        resource.get(
+                            "segment_id"
+                        )
+                    )
+                    for resource
+                    in resources
+                    if (
+                        isinstance(
+                            resource,
+                            dict,
+                        )
+                        and resource.get(
+                            "segment_id"
+                        )
+                    )
+                })
+
                 observations.append({
                     "layer": "retrieval",
                     "source": (
@@ -251,6 +301,12 @@ def project_dify_cognitive_trace(
                     "status": "succeeded",
                     "resource_count": len(
                         resources
+                    ),
+                    "source_ids": (
+                        source_ids
+                    ),
+                    "segment_ids": (
+                        segment_ids
                     ),
                     "semantic_correctness": (
                         "unknown"

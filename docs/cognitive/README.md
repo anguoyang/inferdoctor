@@ -47,3 +47,26 @@ A live Dify application can be captured with:
 The adapter reuses Dify's existing streaming events.
 
 Raw query text, node inputs, node outputs, reasoning text, tool input, and retrieved content are not retained in the cognitive trace.
+
+## Semantic cases
+
+Runtime success is not enough to diagnose cognitive correctness.
+
+A Cognitive Case can define known-good expectations:
+
+- `expected_intent`
+- `expected_route`
+- `expected_tool`
+- `expected_sources`
+
+Intent and route values are compared by SHA256. A case may contain either a plain expected value or a precomputed `sha256`.
+
+The semantic evaluator reports the earliest supported mismatch as `first_broken_layer`.
+
+Example interpretation:
+
+`Intent PASS -> Route FAIL -> Action UNKNOWN -> Retrieval UNKNOWN`
+
+In that case Route is the first semantic broken layer. Later problems must not automatically be blamed on retrieval or model capability.
+
+Missing semantic evidence produces `UNKNOWN`, not failure.

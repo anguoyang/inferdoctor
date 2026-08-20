@@ -36,6 +36,13 @@ from inferdoctor.core.cognitive import (
 from inferdoctor.core.dify_cognitive import (
     capture_dify_cognitive_trace,
 )
+from inferdoctor.core.cognitive_semantics import (
+    evaluate_cognitive_case,
+    init_cognitive_case_template,
+    load_cognitive_case,
+    load_cognitive_trace,
+    validate_cognitive_case_file,
+)
 from inferdoctor.core.dify_reliability import (
     render_reliability_report,
     run_dify_connectivity_check,
@@ -581,6 +588,57 @@ def _parser() -> argparse.ArgumentParser:
         "--output",
         required=True,
         help="Write cognitive trace JSON to this path",
+    )
+
+    cognitive = subparsers.add_parser(
+        "cognitive",
+        help="Diagnose semantic failures across AI application cognitive layers",
+    )
+    cognitive_subparsers = cognitive.add_subparsers(
+        dest="cognitive_command",
+        required=True,
+    )
+
+    cognitive_case = cognitive_subparsers.add_parser(
+        "case",
+        help="Create and validate Cognitive Case files",
+    )
+    cognitive_case_subparsers = cognitive_case.add_subparsers(
+        dest="cognitive_case_command",
+        required=True,
+    )
+
+    cognitive_case_init = cognitive_case_subparsers.add_parser(
+        "init",
+        help="Write a synthetic Cognitive Case template",
+    )
+    cognitive_case_init.add_argument(
+        "--output",
+        required=True,
+    )
+
+    cognitive_case_validate = cognitive_case_subparsers.add_parser(
+        "validate",
+        help="Validate a Cognitive Case JSON file",
+    )
+    cognitive_case_validate.add_argument(
+        "path"
+    )
+
+    cognitive_diagnose = cognitive_subparsers.add_parser(
+        "diagnose",
+        help="Evaluate expected intent, route, tool, and retrieval evidence",
+    )
+    cognitive_diagnose.add_argument(
+        "--case",
+        required=True,
+    )
+    cognitive_diagnose.add_argument(
+        "--trace",
+        required=True,
+    )
+    cognitive_diagnose.add_argument(
+        "--output",
     )
 
     rag = subparsers.add_parser("rag", help="Diagnose RAG answer quality with deterministic layered evidence")
@@ -1282,6 +1340,112 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 print("inferdoctor: {0}".format(exc), file=sys.stderr)
                 return 2
 
+
+    if args.command == "cognitive":
+        try:
+            if (
+                args.cognitive_command
+                == "case"
+                and args.cognitive_case_command
+                == "init"
+            ):
+                output = (
+                    init_cognitive_case_template(
+                        args.output
+                    )
+                )
+
+                print(
+                    "Wrote Cognitive Case template: {0}".format(
+                        output
+                    )
+                )
+
+                return 0
+
+            if (
+                args.cognitive_command
+                == "case"
+                and args.cognitive_case_command
+                == "validate"
+            ):
+                result = (
+                    validate_cognitive_case_file(
+                        args.path
+                    )
+                )
+
+                print(
+                    "Cognitive Case validation: {0}".format(
+                        result["status"]
+                    )
+                )
+
+                for error in result.get(
+                    "errors",
+                    [],
+                ):
+                    print(
+                        "- {0}".format(
+                            error
+                        )
+                    )
+
+                return (
+                    1
+                    if result["status"]
+                    == "FAIL"
+                    else 0
+                )
+
+            if (
+                args.cognitive_command
+                == "diagnose"
+            ):
+                result = (
+                    evaluate_cognitive_case(
+                        load_cognitive_case(
+                            args.case
+                        ),
+                        load_cognitive_trace(
+                            args.trace
+                        ),
+                    )
+                )
+
+                rendered = (
+                    render_cognitive_analysis(
+                        result
+                    )
+                )
+
+                _emit_output(
+                    rendered,
+                    args.output,
+                )
+
+                return (
+                    1
+                    if result[
+                        "semantic_status"
+                    ]
+                    == "FAIL"
+                    else 0
+                )
+
+        except (
+            ValueError,
+            OSError,
+            json.JSONDecodeError,
+        ) as exc:
+            print(
+                "inferdoctor: {0}".format(
+                    exc
+                ),
+                file=sys.stderr,
+            )
+
+            return 2
 
     if args.command == "rag":
         try:
