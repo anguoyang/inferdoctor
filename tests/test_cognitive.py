@@ -403,3 +403,54 @@ def test_dify_projection_preserves_safe_semantic_evidence():
             "segment-2",
         ]
     )
+
+
+
+def test_agent_thought_preserves_ordered_plan_tool_evidence():
+    events = [
+        {
+            "event": "agent_thought",
+            "position": 2,
+            "tool": "send_email",
+        },
+        {
+            "event": "agent_thought",
+            "position": 1,
+            "tool": "crm_lookup",
+        },
+    ]
+
+    trace = (
+        project_dify_cognitive_trace(
+            events
+        )
+    )
+
+    plan = [
+        item
+        for item
+        in trace["observations"]
+        if item["layer"] == "plan"
+    ]
+
+    assert len(plan) == 2
+
+    assert (
+        plan[0]["planned_tool"]
+        == "send_email"
+    )
+
+    assert (
+        plan[0]["position"]
+        == 2
+    )
+
+    assert (
+        plan[1]["planned_tool"]
+        == "crm_lookup"
+    )
+
+    assert (
+        plan[1]["position"]
+        == 1
+    )

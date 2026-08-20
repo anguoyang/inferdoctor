@@ -92,6 +92,7 @@ def validate_cognitive_case(
     expected_fields = (
         "expected_intent",
         "expected_route",
+        "expected_plan",
         "expected_tool",
         "expected_sources",
     )
@@ -118,6 +119,35 @@ def validate_cognitive_case(
                 field
                 + " must be a string or an object "
                 + "containing value or sha256"
+            )
+
+    if "expected_plan" in case:
+        plan = case.get(
+            "expected_plan"
+        )
+
+        if isinstance(plan, dict):
+            plan = plan.get(
+                "tool_sequence"
+            )
+
+        if (
+            not isinstance(
+                plan,
+                list,
+            )
+            or not plan
+            or any(
+                not isinstance(
+                    item,
+                    str,
+                )
+                or not item
+                for item in plan
+            )
+        ):
+            errors.append(
+                "expected_plan must be a non-empty list of tool names or an object containing tool_sequence"
             )
 
     if "expected_tool" in case:
@@ -250,6 +280,128 @@ def _decision_result(
     return (
         "FAIL",
         "observed decision does not match expected decision hash",
+    )
+
+
+def _expected_plan_tools(
+    expectation: Any,
+) -> Optional[List[str]]:
+    value = expectation
+
+    if isinstance(
+        expectation,
+        dict,
+    ):
+        value = expectation.get(
+            "tool_sequence"
+        )
+
+    if (
+        not isinstance(
+            value,
+            list,
+        )
+        or not value
+    ):
+        return None
+
+    if any(
+        not isinstance(
+            item,
+            str,
+        )
+        or not item
+        for item in value
+    ):
+        return None
+
+    return list(value)
+
+
+def _plan_result(
+    trace: Dict[str, Any],
+    expectation: Any,
+) -> Tuple[str, str]:
+    expected = (
+        _expected_plan_tools(
+            expectation
+        )
+    )
+
+    if expected is None:
+        return (
+            "UNKNOWN",
+            "expected plan is not evaluable",
+        )
+
+    observations = (
+        _layer_observations(
+            trace,
+            "plan",
+        )
+    )
+
+    plan_items = [
+        item
+        for item in observations
+        if isinstance(
+            item.get(
+                "planned_tool"
+            ),
+            str,
+        )
+    ]
+
+    if not plan_items:
+        return (
+            "UNKNOWN",
+            "agent tool-plan sequence was not captured",
+        )
+
+    def order_key(
+        item: Dict[str, Any],
+    ) -> Tuple[int, int]:
+        position = item.get(
+            "position"
+        )
+
+        if isinstance(
+            position,
+            int,
+        ):
+            return (
+                0,
+                position,
+            )
+
+        return (
+            1,
+            0,
+        )
+
+    plan_items = sorted(
+        plan_items,
+        key=order_key,
+    )
+
+    observed = [
+        str(
+            item[
+                "planned_tool"
+            ]
+        )
+        for item in plan_items
+    ]
+
+    if observed == expected:
+        return (
+            "PASS",
+            "observed agent tool sequence matches the expected plan",
+        )
+
+    return (
+        "FAIL",
+        "observed agent tool sequence does not match the expected plan",
     )
 
 
@@ -397,6 +549,21 @@ def evaluate_cognitive_case(
         )
 
         semantic["route"] = {
+            "status": status,
+            "evidence": evidence,
+        }
+
+    if "expected_plan" in case:
+        status, evidence = (
+            _plan_result(
+                trace,
+                case[
+                    "expected_plan"
+                ],
+            )
+        )
+
+        semantic["plan"] = {
             "status": status,
             "evidence": evidence,
         }
@@ -601,6 +768,9 @@ def init_cognitive_case_template(
         "expected_route": {
             "value": "refund_route",
         },
+        "expected_plan": [
+            "crm_lookup"
+        ],
         "expected_tool": "crm_lookup",
         "expected_sources": [
             "policy-document"

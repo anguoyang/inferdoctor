@@ -205,7 +205,15 @@ def project_dify_cognitive_trace(
             event.get("event")
             == "agent_thought"
         ):
-            observations.append({
+            tool = event.get("tool")
+            position = event.get(
+                "position"
+            )
+
+            plan_observation: Dict[
+                str,
+                Any,
+            ] = {
                 "layer": "plan",
                 "source": (
                     "dify_agent_thought"
@@ -217,9 +225,27 @@ def project_dify_cognitive_trace(
                 "semantic_correctness": (
                     "unknown"
                 ),
-            })
+            }
 
-            tool = event.get("tool")
+            if isinstance(
+                position,
+                int,
+            ):
+                plan_observation[
+                    "position"
+                ] = position
+
+            if (
+                isinstance(tool, str)
+                and tool
+            ):
+                plan_observation[
+                    "planned_tool"
+                ] = tool
+
+            observations.append(
+                plan_observation
+            )
 
             if (
                 isinstance(tool, str)

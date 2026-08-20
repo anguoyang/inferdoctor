@@ -399,3 +399,141 @@ def test_renderer_marks_semantic_first_broken_layer():
         "FIRST SEMANTIC BROKEN"
         in rendered
     )
+
+
+
+def test_plan_can_be_first_broken_after_intent_and_route_pass():
+    trace = (
+        project_dify_cognitive_trace([
+            node(
+                "intent",
+                "question-classifier",
+                "refund",
+            ),
+            node(
+                "route",
+                "if-else",
+                "refund-route",
+            ),
+            {
+                "event": "agent_thought",
+                "position": 1,
+                "tool": "web_search",
+            },
+        ])
+    )
+
+    result = evaluate_cognitive_case(
+        case(
+            expected_intent="refund",
+            expected_route=(
+                "refund-route"
+            ),
+            expected_plan=[
+                "crm_lookup"
+            ],
+            expected_tool=(
+                "crm_lookup"
+            ),
+        ),
+        trace,
+    )
+
+    assert (
+        result["first_broken_layer"]
+        == "plan"
+    )
+
+    plan = next(
+        item
+        for item in result["layers"]
+        if item["layer"] == "plan"
+    )
+
+    action = next(
+        item
+        for item in result["layers"]
+        if item["layer"] == "action"
+    )
+
+    assert (
+        plan["semantic_status"]
+        == "FAIL"
+    )
+
+    assert (
+        plan["semantic_role"]
+        == "FIRST_BROKEN"
+    )
+
+    assert (
+        action["semantic_status"]
+        == "FAIL"
+    )
+
+    assert (
+        action["semantic_role"]
+        == "DOWNSTREAM_OBSERVATION"
+    )
+
+
+def test_plan_sequence_can_pass():
+    trace = (
+        project_dify_cognitive_trace([
+            {
+                "event": "agent_thought",
+                "position": 2,
+                "tool": "send_email",
+            },
+            {
+                "event": "agent_thought",
+                "position": 1,
+                "tool": "crm_lookup",
+            },
+        ])
+    )
+
+    result = evaluate_cognitive_case(
+        case(
+            expected_plan={
+                "tool_sequence": [
+                    "crm_lookup",
+                    "send_email",
+                ]
+            }
+        ),
+        trace,
+    )
+
+    assert (
+        result["semantic_status"]
+        == "PASS"
+    )
+
+
+def test_missing_plan_evidence_is_unknown():
+    trace = {
+        "schema_version": (
+            "inferdoctor.cognitive.trace.v1"
+        ),
+        "observations": [],
+    }
+
+    result = evaluate_cognitive_case(
+        case(
+            expected_plan=[
+                "crm_lookup"
+            ]
+        ),
+        trace,
+    )
+
+    assert (
+        result["semantic_status"]
+        == "INCOMPLETE"
+    )
+
+    assert (
+        result["first_broken_layer"]
+        is None
+    )

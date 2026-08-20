@@ -137,3 +137,25 @@ InferDoctor can reuse the existing RAG Gold Context Probe from a Cognitive diagn
 `inferdoctor cognitive probe gold-context --cognitive-case cognitive-case.json --cognitive-trace cognitive-trace.json --rag-case rag-case.json --context-file gold.txt --endpoint http://127.0.0.1:8000/v1 --model MODEL`
 
 Gold Context is a capability-isolation probe, not a strict one-variable replay. It supplies known-good context together with explicit grounding and therefore must not be used to claim that retrieval alone was the unique cause.
+
+
+### Plan evidence
+
+For Dify Agent execution, InferDoctor can evaluate a privacy-safe plan signal without retaining chain-of-thought.
+
+The captured `agent_thought` event contributes only:
+
+- position
+- selected tool name
+
+A Cognitive Case may define:
+
+`"expected_plan": ["crm_lookup", "send_email"]`
+
+or:
+
+`"expected_plan": {"tool_sequence": ["crm_lookup", "send_email"]}`
+
+InferDoctor compares the ordered observed tool sequence with the expected sequence.
+
+This is deliberately narrower than claiming access to the model's hidden reasoning. It diagnoses observable action planning, not private chain-of-thought.
