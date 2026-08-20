@@ -48,6 +48,45 @@ def test_provider_check_requires_explicit_public_allow():
         )
 
 
+def test_provider_check_requires_explicit_private_allow():
+    provider = replace(
+        get_provider_preset("orcarouter"),
+        base_url="http://192.168.1.20:8000/v1",
+    )
+
+    with pytest.raises(ProviderError, match="--allow-non-local"):
+        run_provider_check(provider, api_key="secret")
+
+    result = run_provider_check(
+        provider,
+        api_key=None,
+        allow_non_local=True,
+    )
+
+    assert result["endpoint_category"] == "private"
+    assert result["status"] == "FAIL"
+    assert result["request_sent"] is False
+
+
+def test_provider_check_rejects_url_credentials_without_exposing_them():
+    provider = replace(
+        get_provider_preset("orcarouter"),
+        base_url="http://user:top-secret@127.0.0.1:8000/v1",
+    )
+
+    with pytest.raises(
+        ProviderError,
+        match="URL credentials are not allowed",
+    ) as exc_info:
+        run_provider_check(
+            provider,
+            api_key="secret",
+        )
+
+    assert "top-secret" not in str(exc_info.value)
+    assert "user" not in str(exc_info.value)
+
+
 def test_missing_key_sends_no_request_and_fails_configuration(monkeypatch):
     probe = patch("inferdoctor.core.providers.list_models")
     with probe as models_probe:

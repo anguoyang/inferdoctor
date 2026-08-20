@@ -6,19 +6,18 @@
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.9%2B-blue.svg)](pyproject.toml)
 
-**InferDoctor helps developers diagnose, build, measure, compare, and optimize local or self-hosted AI apps.**
+**Evidence-driven diagnosis for local and hosted AI applications.**
 
-Diagnose what is broken. Choose a reasonable stack. Generate a starter app. Validate it. Measure responsiveness. Save a baseline. Compare after a change. Then verify whether the user experience actually improved.
+InferDoctor normalizes evidence from local stacks, Dify applications, RAG and agent traces, and explicitly approved OpenAI-compatible providers. It identifies the first broken layer, proposes controlled next probes, and keeps missing evidence visible instead of guessing.
 
-Local AI setup often fails for unclear reasons: ports, CUDA, drivers, runtimes,
-OpenAI-compatible endpoints, model size, app scaffolding, streaming behavior, and
-RAG latency all interact. InferDoctor gives you one command for stack health, then
-a beginner-friendly path from diagnosis to a small generated app and a bounded
-performance feedback loop.
+The original local AI workflow remains available: inspect stack health, choose a reasonable setup, generate and validate a starter app, measure bounded responsiveness, save a baseline, and compare after a change.
 
 Use it to:
 
 - find why Ollama, vLLM, SGLang, Xinference, Dify, CUDA, NVIDIA, Docker, or local endpoints are not working;
+- attribute RAG and agent failures across intent, routing, planning, tools, retrieval, context, generation, and postprocessing;
+- plan minimal evidence-gathering probes and run controlled cognitive or Gold Context replays;
+- check explicitly approved hosted providers with conservative authentication and model-access evidence;
 - estimate what your machine can realistically run with clear heuristic caveats;
 - choose a practical local AI stack for a goal such as customer service, document Q&A, or a local API;
 - generate, validate, and smoke-test starter projects without contacting a model endpoint;
@@ -26,8 +25,7 @@ Use it to:
 - save sanitized performance baselines and compare before/after changes;
 - get practical TTFT, streaming, TPS, cold/warm, endpoint, and RAG UX optimization advice.
 
-It is lightweight and read-only by default. It does not install AI runtimes,
-download models, run inference, publish data, or modify system settings.
+It is lightweight and read-only by default. It does not install AI runtimes, download models, publish data, or modify system settings. Live endpoint checks require explicit scope approval, and model invocation occurs only when an optional smoke request is explicitly selected.
 
 ## Install
 
@@ -116,9 +114,9 @@ inferdoctor perf compare before.json after.json
 inferdoctor optimize plan --report after.json
 ```
 
-## Dify Integration Development
+## Dify Diagnostics
 
-InferDoctor v0.7 development adds Dify workflows for local, LAN, private, self-hosted, or explicitly approved public Dify applications connected to local or private models.
+InferDoctor v0.7 adds Dify workflows for local, LAN, private, self-hosted, or explicitly approved public Dify applications connected to local or private models.
 
 ```bash
 inferdoctor dify check
@@ -144,11 +142,14 @@ Docs:
 - [Dify reference example](https://github.com/anguoyang/inferdoctor/tree/main/examples/dify/local_private_rag)
 
 
-## RAG Intelligence Development
+## RAG and Cognitive Intelligence
 
-InferDoctor development now includes a framework-neutral RAG Intelligence Doctor for diagnosing why a running RAG app gives incomplete or ungrounded answers. It uses Case and Trace schemas, layered diagnosis, before/after comparison, and a Gold Context Probe.
+InferDoctor includes a framework-neutral RAG Intelligence Doctor for diagnosing incomplete or ungrounded answers. Case and Trace schemas normalize evidence for layered and First Broken Layer diagnosis. Cognitive diagnosis extends the path through intent, route, plan, action, retrieval, context, generation, and postprocessing, with minimal next probes and controlled replay.
 
-Docs: [RAG Intelligence Doctor](https://github.com/anguoyang/inferdoctor/blob/main/docs/rag/README.md)
+Docs:
+
+- [RAG Intelligence Doctor](https://github.com/anguoyang/inferdoctor/blob/main/docs/rag/README.md)
+- [Cognitive Diagnosis](https://github.com/anguoyang/inferdoctor/blob/main/docs/cognitive/README.md)
 
 ## Provider Foundation
 

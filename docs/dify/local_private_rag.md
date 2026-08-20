@@ -1,6 +1,6 @@
 # Local / Private RAG Starter Kit for Dify
 
-`local-private-rag` is the first Dify starter kit in InferDoctor v0.7 development.
+`local-private-rag` is the first Dify starter kit in InferDoctor v0.7.
 
 It is designed for teams that want Dify orchestration with a local, LAN, private, or self-hosted model endpoint.
 

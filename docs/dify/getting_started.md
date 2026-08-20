@@ -1,6 +1,6 @@
 # Dify Integration Getting Started
 
-InferDoctor v0.7 development adds a Dify-first workflow for local, LAN, private, self-hosted, and explicitly approved Dify Cloud applications.
+InferDoctor v0.7 adds a Dify-first workflow for local, LAN, private, self-hosted, and explicitly approved Dify Cloud applications.
 
 The goal is not to replace Dify. Dify remains the orchestration layer for Chatflow, Workflow, application APIs, knowledge APIs, and manual DSL import/export. InferDoctor helps you validate the kit, run safe smoke tests, measure perceived latency, compare changes, and generate Dify-specific optimization guidance.
 
@@ -8,12 +8,6 @@ The goal is not to replace Dify. Dify remains the orchestration layer for Chatfl
 
 ```bash
 pip install inferdoctor
-```
-
-For v0.7 development features before release, install from the `dev` branch:
-
-```bash
-python -m pip install "git+https://github.com/anguoyang/inferdoctor.git@dev"
 ```
 
 ## Offline First

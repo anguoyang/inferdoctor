@@ -1,6 +1,6 @@
 # Dify Integration Compatibility
 
-InferDoctor v0.7 development adds a Dify-first workflow for validating, smoke-testing, measuring, and optimizing Dify applications connected to local, LAN, private, self-hosted, or explicitly approved public endpoints.
+InferDoctor v0.7 adds a Dify-first workflow for validating, smoke-testing, measuring, and optimizing Dify applications connected to local, LAN, private, self-hosted, or explicitly approved public endpoints.
 
 This integration uses published Dify APIs only. It does not depend on Dify database tables, Redis queues, Celery internals, Studio browser requests, Docker volumes, or undocumented admin APIs.
 

@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "inferdoctor"
-version = "0.6.0"
-description = "Local AI stack doctor and setup assistant."
+version = "0.7.0"
+description = "Evidence-driven diagnosis for local and hosted AI applications."
 readme = "README.md"
 requires-python = ">=3.9"
 license = "Apache-2.0"

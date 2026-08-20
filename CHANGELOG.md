@@ -2,22 +2,27 @@
 
 ## Unreleased
 
-### v0.7 Development
+### v0.7.0 Release Candidate
 
-- Added Dify application-level command group for preflight checks, kit export, offline validation, dry-run smoke tests, live app smoke tests, performance smoke reports, optimization guidance, and read-only knowledge retrieval checks.
-- Added the Local / Private RAG Starter Kit for Dify with manifest, starter DSL draft, preflight checks, smoke cases, sample document, performance guidance, and optimization notes.
-- Added Dify-specific SSE parsing for chat, chatflow, agent, workflow, node, completion, unknown, malformed, and error events.
-- Added Dify performance reports compatible with existing InferDoctor baseline and comparison workflows.
-- Added Dify documentation, security boundaries, Japanese quickstart, and a public reference example.
+#### Highlights
 
-### Safety
+- Added Dify application diagnostics, safe orchestration tracing, Local / Private RAG kit workflows, performance smoke reports, and read-only knowledge retrieval checks.
+- Added framework-neutral RAG Intelligence with evidence normalization, layered diagnosis, comparison, and First Broken Layer attribution.
+- Added cognitive-path diagnosis across intent, route, plan, action, retrieval, context, generation, and postprocessing.
+- Added the Minimal Next Probe Planner, Controlled Cognitive Replay, and Gold Context capability-isolation probes.
+- Added OpenInference / OTLP trace adaptation, including observable Agent-to-Tool plan evidence.
+- Added provider metadata and one shared OpenAI-compatible transport, with OrcaRouter as the first provider preset.
+- Added Provider Check for bounded connectivity, authentication, model-catalog, and optional model-invocation evidence.
 
-- Dify integration uses published Dify APIs only.
-- InferDoctor does not install Dify, start containers, import DSLs automatically, create knowledge bases, upload documents, or store API keys.
-- Live Dify smoke tests require explicit endpoint and credential configuration.
-- LAN/private endpoints require explicit opt-in, and public endpoints require explicit public opt-in.
-- Dify performance checks are bounded smoke tests, not formal benchmarks.
-- Version remains 0.6.0 during v0.7 development.
+#### Safety and Evidence Boundaries
+
+- Dify integration uses published APIs and remains read-only by default; it does not install Dify, start containers, import DSLs automatically, create knowledge bases, or upload documents.
+- API keys and optional chat response content are never retained or rendered in Provider Check results.
+- Public endpoints require explicit `--allow-public`; LAN/private endpoints require explicit `--allow-non-local`; URL credentials are rejected.
+- A model catalog entry does not prove invocation access, and HTTP 401 authentication failures remain distinct from HTTP 403 model-access denials.
+- Unsupported probes and missing evidence remain `UNKNOWN`, including TTFT, pricing, and total compute cost.
+- Partner metadata cannot influence diagnosis, scores, comparisons, rankings, or recommendations.
+- Live checks and performance reports are bounded smoke tests, not formal benchmarks.
 
 ## v0.6.0
 

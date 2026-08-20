@@ -55,5 +55,6 @@ issue templates, or generated reports.
 - Major releases: breaking CLI or report schema changes.
 
 InferDoctor diagnostics are read-only by default. A package release must not add
-model downloads, model execution, GPU framework imports, or system modification
-steps.
+automatic model downloads, automatic model invocation, GPU framework imports, or
+system modification steps. Explicit bounded smoke probes must remain opt-in and
+document exactly what evidence they retain.

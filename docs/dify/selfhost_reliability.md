@@ -1,6 +1,6 @@
 # Dify Self-Host Reliability Doctor
 
-InferDoctor v0.7 development adds read-only reliability diagnostics for self-hosted Dify deployments. The goal is not to replace Dify. Dify builds and runs the application; InferDoctor collects bounded evidence about the host, Docker Compose deployment, Plugin Daemon, Sandbox, SSRF Proxy, model endpoints, and knowledge infrastructure so users can localize the failing layer.
+InferDoctor v0.7 adds read-only reliability diagnostics for self-hosted Dify deployments. The goal is not to replace Dify. Dify builds and runs the application; InferDoctor collects bounded evidence about the host, Docker Compose deployment, Plugin Daemon, Sandbox, SSRF Proxy, model endpoints, and knowledge infrastructure so users can localize the failing layer.
 
 ## What It Checks
 
