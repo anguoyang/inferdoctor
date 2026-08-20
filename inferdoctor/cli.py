@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import argparse
+import json
+import os
 import sys
 from pathlib import Path
 from typing import List, Optional, Sequence, Tuple
@@ -8,6 +10,63 @@ from typing import List, Optional, Sequence, Tuple
 from inferdoctor import __version__
 from inferdoctor.checkers import default_registry
 from inferdoctor.core.capacity import render_capacity
+from inferdoctor.core.dify import (
+    DifyError,
+    available_dify_template_names,
+    export_dify_template,
+    load_dify_config,
+    optimize_dify,
+    render_dify_check,
+    render_dify_knowledge,
+    render_dify_optimize,
+    render_dify_perf,
+    render_dify_smoke,
+    render_dify_template_export,
+    render_dify_template_list,
+    render_dify_template_show,
+    render_dify_validation,
+    run_dify_check,
+    run_dify_knowledge_check,
+    run_dify_perf,
+    run_dify_smoke,
+    validate_dify_kit,
+)
+from inferdoctor.core.cognitive import (
+    render_cognitive_analysis,
+)
+from inferdoctor.core.dify_cognitive import (
+    capture_dify_cognitive_trace,
+)
+from inferdoctor.core.cognitive_semantics import (
+    evaluate_cognitive_case,
+    init_cognitive_case_template,
+    load_cognitive_case,
+    load_cognitive_trace,
+    validate_cognitive_case_file,
+)
+from inferdoctor.core.cognitive_probes import (
+    plan_next_cognitive_probe,
+    render_probe_plan,
+)
+from inferdoctor.core.cognitive_replay import (
+    compare_controlled_replay,
+    render_replay_comparison,
+)
+from inferdoctor.core.cognitive_gold import (
+    render_cognitive_gold_context,
+    run_cognitive_gold_context_probe,
+)
+from inferdoctor.core.openinference_adapter import (
+    load_openinference_trace,
+)
+from inferdoctor.core.dify_reliability import (
+    render_reliability_report,
+    run_dify_connectivity_check,
+    run_dify_evidence_collect,
+    run_dify_evidence_explain,
+    run_dify_selfhost_inspect,
+    run_dify_selfhost_preflight,
+)
 from inferdoctor.core.config import (
     Config,
     ConfigError,
@@ -28,6 +87,16 @@ from inferdoctor.core.optimize import advise_endpoint, advise_rag, render_optimi
 from inferdoctor.core.optimization_plan import build_optimization_plan, render_optimization_plan
 from inferdoctor.core.models import CheckResult, Status
 from inferdoctor.core.profile import render_profile_json, render_profile_markdown
+from inferdoctor.core.providers import (
+    ProviderError,
+    get_provider_preset,
+    list_provider_presets,
+    provider_ids,
+    render_provider_check,
+    render_provider_list,
+    render_provider_show,
+    run_provider_check,
+)
 from inferdoctor.core.perf import render_perf_json, render_perf_markdown, render_perf_result, run_endpoint_smoke, run_streaming_smoke
 from inferdoctor.core.perf_baseline import (
     create_baseline_from_report_file,
@@ -40,6 +109,21 @@ from inferdoctor.core.perf_baseline import (
 )
 from inferdoctor.core.perf_compare import compare_performance_files, render_comparison
 from inferdoctor.core.recommendations import recommend_stack, render_recommendation
+from inferdoctor.core.rag import (
+    RagError,
+    compare_rag,
+    diagnose_rag,
+    init_case_template,
+    load_case,
+    load_trace,
+    render_rag_result,
+    run_gold_context_probe,
+    validate_case_file,
+    validate_trace_file,
+)
+from inferdoctor.core.rag_dify import (
+    capture_dify_knowledge_trace,
+)
 from inferdoctor.core.quickstart import (
     QUICKSTART_GOALS,
     QUICKSTART_HARDWARE,
@@ -190,6 +274,56 @@ def _parser() -> argparse.ArgumentParser:
         help="Override the selected service endpoint for this check",
     )
     _add_runtime_options(check)
+
+    provider = subparsers.add_parser(
+        "provider",
+        help="Inspect provider presets and run bounded provider checks",
+        description="Provider-neutral OpenAI-compatible metadata and evidence-driven checks.",
+    )
+    provider_subparsers = provider.add_subparsers(
+        dest="provider_command",
+        required=True,
+    )
+    provider_subparsers.add_parser(
+        "list",
+        help="List built-in provider presets",
+    )
+    provider_show = provider_subparsers.add_parser(
+        "show",
+        help="Show one provider preset",
+    )
+    provider_show.add_argument("provider", choices=provider_ids())
+    provider_check = provider_subparsers.add_parser(
+        "check",
+        help="Run a bounded provider connectivity/auth/model check",
+    )
+    provider_check.add_argument(
+        "--provider",
+        required=True,
+        choices=provider_ids(),
+    )
+    provider_check.add_argument(
+        "--timeout",
+        type=_positive_float,
+        default=10.0,
+    )
+    provider_check.add_argument(
+        "--model",
+        help="Override the provider preset's default model",
+    )
+    provider_check.add_argument(
+        "--smoke",
+        action="store_true",
+        help="Opt in to one minimal chat request; response content is not retained",
+    )
+    provider_check.add_argument("--allow-non-local", action="store_true")
+    provider_check.add_argument("--allow-public", action="store_true")
+    provider_check.add_argument(
+        "--format",
+        choices=("console", "json"),
+        default="console",
+    )
+    provider_check.add_argument("--output")
 
     model = subparsers.add_parser(
         "model",
@@ -411,6 +545,493 @@ def _parser() -> argparse.ArgumentParser:
         epilog="Example: inferdoctor experience profile customer-service",
     )
     experience_profile.add_argument("name", choices=profile_names(), help="Experience profile name")
+
+
+    dify = subparsers.add_parser(
+        "dify",
+        help="Validate, smoke-test, and optimize Dify application kits",
+        description=(
+            "Dify integration helpers for published app APIs, Local/Private RAG kits, "
+            "safe smoke tests, and performance UX guidance."
+        ),
+    )
+    dify_subparsers = dify.add_subparsers(dest="dify_command", required=True)
+
+    def add_dify_app_options(command):
+        command.add_argument("--base-url", help="Dify application API base URL, for example http://127.0.0.1:5001/v1")
+        command.add_argument("--app-key-env", default="DIFY_APP_API_KEY", help="Environment variable containing the Dify application API key")
+        command.add_argument("--timeout", type=_positive_float, default=30.0, help="Strict request timeout in seconds")
+        command.add_argument("--allow-non-local", action="store_true", help="Allow a tiny live request to a LAN/private Dify endpoint you control")
+        command.add_argument("--allow-public", action="store_true", help="Allow a tiny live request to an explicitly supplied public Dify endpoint")
+        command.add_argument("--format", choices=("console", "json", "markdown"), default="console", help="Output format")
+        command.add_argument("--output", help="Write output to this file")
+
+    dify_check = dify_subparsers.add_parser("check", help="Check Dify app API configuration and /info readiness")
+    add_dify_app_options(dify_check)
+
+    dify_template = dify_subparsers.add_parser("template", help="List, show, and export Dify application kits")
+    dify_template_subparsers = dify_template.add_subparsers(dest="dify_template_command", required=True)
+    dify_template_subparsers.add_parser("list", help="List built-in Dify kits")
+    dify_template_show = dify_template_subparsers.add_parser("show", help="Show one Dify kit")
+    dify_template_show.add_argument("name", choices=available_dify_template_names() + ["local-rag", "private-rag"])
+    dify_template_export = dify_template_subparsers.add_parser("export", help="Export a Dify kit to a directory")
+    dify_template_export.add_argument("name", choices=available_dify_template_names() + ["local-rag", "private-rag"])
+    dify_template_export.add_argument("--output", required=True, help="Directory where kit files should be written")
+    dify_template_export.add_argument("--overwrite", action="store_true", help="Overwrite generated kit files in a non-empty output directory")
+
+    dify_validate = dify_subparsers.add_parser("validate", help="Offline-validate a Dify kit or DSL file")
+    dify_validate.add_argument("path", help="Dify kit directory or dify_app.yaml path")
+    dify_validate.add_argument("--format", choices=("console", "json", "markdown"), default="console")
+    dify_validate.add_argument("--output", help="Write output to this file")
+
+    dify_smoke = dify_subparsers.add_parser("smoke", help="Run an offline or tiny live Dify app smoke test")
+    dify_smoke.add_argument("--kit", help="Dify kit directory for offline dry-run validation")
+    dify_smoke.add_argument("--dry-run", action="store_true", help="Do not contact Dify; validate the kit only")
+    dify_smoke.add_argument("--query", help="Harmless non-sensitive query for live mode")
+    dify_smoke.add_argument("--show-answer", action="store_true", help="Show a short answer preview in live mode")
+    add_dify_app_options(dify_smoke)
+
+    dify_perf = dify_subparsers.add_parser("perf", help="Run bounded Dify application performance smoke tests")
+    add_dify_app_options(dify_perf)
+    dify_perf.add_argument("--runs", type=_perf_runs, default=1, help="Measured request count, bounded to 1-3")
+    dify_perf.add_argument("--warmup", type=_perf_warmup, default=0, help="Warmup request count, bounded to 0-1")
+    dify_perf.add_argument("--query", help="Harmless non-sensitive query for the smoke test")
+    dify_perf.add_argument("--profile", choices=profile_names(), help="Experience profile for readiness context")
+
+    dify_optimize = dify_subparsers.add_parser("optimize", help="Generate Dify-specific performance optimization guidance")
+    dify_optimize.add_argument("--report", help="Dify performance JSON report")
+    dify_optimize.add_argument("--kit", help="Dify kit directory or DSL path for static analysis")
+    dify_optimize.add_argument("--retrieval-ms", type=_positive_float, help="User-supplied retrieval latency in milliseconds")
+    dify_optimize.add_argument("--rerank-ms", type=_positive_float, help="User-supplied rerank latency in milliseconds")
+    dify_optimize.add_argument("--profile", choices=profile_names(), help="Experience profile for optimization priorities")
+    dify_optimize.add_argument("--format", choices=("console", "json", "markdown"), default="console")
+    dify_optimize.add_argument("--output", help="Write output to this file")
+
+    dify_knowledge = dify_subparsers.add_parser("knowledge", help="Read-only Dify knowledge retrieval checks")
+    dify_knowledge_subparsers = dify_knowledge.add_subparsers(dest="dify_knowledge_command", required=True)
+    dify_knowledge_check = dify_knowledge_subparsers.add_parser("check", help="Run a read-only knowledge retrieval check")
+    dify_knowledge_check.add_argument("--base-url", help="Dify knowledge API base URL")
+    dify_knowledge_check.add_argument("--knowledge-key-env", default="DIFY_KNOWLEDGE_API_KEY", help="Environment variable containing the Dify knowledge API key")
+    dify_knowledge_check.add_argument("--dataset-id", help="Dify dataset ID; defaults to DIFY_DATASET_ID")
+    dify_knowledge_check.add_argument("--query", default="fictional return policy", help="Harmless retrieval query")
+    dify_knowledge_check.add_argument("--show-content", action="store_true", help="Show short retrieved content previews")
+    dify_knowledge_check.add_argument("--timeout", type=_positive_float, default=30.0)
+    dify_knowledge_check.add_argument("--allow-non-local", action="store_true")
+    dify_knowledge_check.add_argument("--allow-public", action="store_true")
+    dify_knowledge_check.add_argument("--format", choices=("console", "json", "markdown"), default="console")
+    dify_knowledge_check.add_argument("--output", help="Write output to this file")
+
+    dify_trace = dify_subparsers.add_parser(
+        "trace",
+        help="Capture Dify orchestration evidence for cognitive-path diagnosis",
+    )
+    dify_trace_subparsers = dify_trace.add_subparsers(
+        dest="dify_trace_command",
+        required=True,
+    )
+    dify_trace_capture = dify_trace_subparsers.add_parser(
+        "capture",
+        help="Capture a safe Dify cognitive execution trace",
+    )
+    dify_trace_capture.add_argument(
+        "--base-url",
+        help="Dify app API base URL",
+    )
+    dify_trace_capture.add_argument(
+        "--app-key-env",
+        default="DIFY_APP_API_KEY",
+        help="Environment variable containing the Dify app API key",
+    )
+    dify_trace_capture.add_argument(
+        "--query",
+        required=True,
+        help="Query to execute through the Dify app",
+    )
+    dify_trace_capture.add_argument(
+        "--timeout",
+        type=_positive_float,
+        default=30.0,
+    )
+    dify_trace_capture.add_argument(
+        "--allow-non-local",
+        action="store_true",
+    )
+    dify_trace_capture.add_argument(
+        "--allow-public",
+        action="store_true",
+    )
+    dify_trace_capture.add_argument(
+        "--output",
+        required=True,
+        help="Write cognitive trace JSON to this path",
+    )
+
+    cognitive = subparsers.add_parser(
+        "cognitive",
+        help="Diagnose semantic failures across AI application cognitive layers",
+    )
+    cognitive_subparsers = cognitive.add_subparsers(
+        dest="cognitive_command",
+        required=True,
+    )
+
+    cognitive_case = cognitive_subparsers.add_parser(
+        "case",
+        help="Create and validate Cognitive Case files",
+    )
+    cognitive_case_subparsers = cognitive_case.add_subparsers(
+        dest="cognitive_case_command",
+        required=True,
+    )
+
+    cognitive_case_init = cognitive_case_subparsers.add_parser(
+        "init",
+        help="Write a synthetic Cognitive Case template",
+    )
+    cognitive_case_init.add_argument(
+        "--output",
+        required=True,
+    )
+
+    cognitive_case_validate = cognitive_case_subparsers.add_parser(
+        "validate",
+        help="Validate a Cognitive Case JSON file",
+    )
+    cognitive_case_validate.add_argument(
+        "path"
+    )
+
+    cognitive_diagnose = cognitive_subparsers.add_parser(
+        "diagnose",
+        help="Evaluate expected intent, route, tool, and retrieval evidence",
+    )
+    cognitive_diagnose.add_argument(
+        "--case",
+        required=True,
+    )
+    cognitive_diagnose.add_argument(
+        "--trace",
+        required=True,
+    )
+    cognitive_diagnose.add_argument(
+        "--output",
+    )
+
+    cognitive_probe = cognitive_subparsers.add_parser(
+        "probe",
+        help="Plan the smallest controlled cognitive diagnostic experiment",
+    )
+    cognitive_probe_subparsers = cognitive_probe.add_subparsers(
+        dest="cognitive_probe_command",
+        required=True,
+    )
+
+    cognitive_probe_next = cognitive_probe_subparsers.add_parser(
+        "next",
+        help="Recommend the next Gold Probe from a Cognitive Case and Trace",
+    )
+    cognitive_probe_next.add_argument(
+        "--case",
+        required=True,
+    )
+    cognitive_probe_next.add_argument(
+        "--trace",
+        required=True,
+    )
+    cognitive_probe_next.add_argument(
+        "--format",
+        choices=("console", "json"),
+        default="console",
+    )
+    cognitive_probe_next.add_argument(
+        "--output",
+    )
+
+    cognitive_gold_context = cognitive_probe_subparsers.add_parser(
+        "gold-context",
+        help="Run Gold Context capability isolation from a Cognitive baseline",
+    )
+    cognitive_gold_context.add_argument(
+        "--cognitive-case",
+        required=True,
+    )
+    cognitive_gold_context.add_argument(
+        "--cognitive-trace",
+        required=True,
+    )
+    cognitive_gold_context.add_argument(
+        "--rag-case",
+        required=True,
+    )
+    cognitive_gold_context.add_argument(
+        "--context-file",
+        required=True,
+    )
+    cognitive_gold_context.add_argument(
+        "--endpoint",
+        required=True,
+    )
+    cognitive_gold_context.add_argument(
+        "--model",
+        required=True,
+    )
+    cognitive_gold_context.add_argument(
+        "--api-key-env",
+    )
+    cognitive_gold_context.add_argument(
+        "--timeout",
+        type=_positive_float,
+        default=30.0,
+    )
+    cognitive_gold_context.add_argument(
+        "--dry-run",
+        action="store_true",
+    )
+    cognitive_gold_context.add_argument(
+        "--allow-non-local",
+        action="store_true",
+    )
+    cognitive_gold_context.add_argument(
+        "--allow-public",
+        action="store_true",
+    )
+    cognitive_gold_context.add_argument(
+        "--retain-answer",
+        action="store_true",
+    )
+    cognitive_gold_context.add_argument(
+        "--format",
+        choices=("console", "json"),
+        default="console",
+    )
+    cognitive_gold_context.add_argument(
+        "--output",
+    )
+
+    cognitive_import = cognitive_subparsers.add_parser(
+        "import",
+        help="Import standard tracing evidence into a Cognitive Trace",
+    )
+    cognitive_import_subparsers = cognitive_import.add_subparsers(
+        dest="cognitive_import_command",
+        required=True,
+    )
+
+    cognitive_import_openinference = cognitive_import_subparsers.add_parser(
+        "openinference",
+        help="Import OpenInference or OTLP JSON spans",
+    )
+    cognitive_import_openinference.add_argument(
+        "--input",
+        required=True,
+    )
+    cognitive_import_openinference.add_argument(
+        "--output",
+        required=True,
+    )
+
+    cognitive_replay = cognitive_subparsers.add_parser(
+        "replay",
+        help="Compare a controlled cognitive replay with its baseline",
+    )
+    cognitive_replay_subparsers = cognitive_replay.add_subparsers(
+        dest="cognitive_replay_command",
+        required=True,
+    )
+
+    cognitive_replay_compare = cognitive_replay_subparsers.add_parser(
+        "compare",
+        help="Verify whether a Gold Probe moved the first broken layer downstream",
+    )
+    cognitive_replay_compare.add_argument(
+        "--case",
+        required=True,
+    )
+    cognitive_replay_compare.add_argument(
+        "--before",
+        required=True,
+    )
+    cognitive_replay_compare.add_argument(
+        "--after",
+        required=True,
+    )
+    cognitive_replay_compare.add_argument(
+        "--target-layer",
+        required=True,
+        choices=(
+            "intent",
+            "route",
+            "plan",
+            "action",
+            "retrieval",
+            "context",
+            "generation",
+            "postprocessing",
+        ),
+    )
+    cognitive_replay_compare.add_argument(
+        "--probe-name",
+    )
+    cognitive_replay_compare.add_argument(
+        "--format",
+        choices=("console", "json"),
+        default="console",
+    )
+    cognitive_replay_compare.add_argument(
+        "--output",
+    )
+
+    rag = subparsers.add_parser("rag", help="Diagnose RAG answer quality with deterministic layered evidence")
+    rag_subparsers = rag.add_subparsers(dest="rag_command", required=True)
+    rag_case = rag_subparsers.add_parser("case", help="Create and validate RAG Case files")
+    rag_case_subparsers = rag_case.add_subparsers(dest="rag_case_command", required=True)
+    rag_case_init = rag_case_subparsers.add_parser("init", help="Write a fictional RAG Case JSONL template")
+    rag_case_init.add_argument("--output", required=True)
+    rag_case_validate = rag_case_subparsers.add_parser("validate", help="Validate a RAG Case JSON or JSONL file")
+    rag_case_validate.add_argument("path")
+    rag_case_validate.add_argument("--format", choices=("console", "json", "markdown"), default="console")
+    rag_case_validate.add_argument("--output")
+    rag_capture = rag_subparsers.add_parser(
+        "capture",
+        help="Capture framework evidence into a standard RAG Trace",
+    )
+    rag_capture_subparsers = rag_capture.add_subparsers(
+        dest="rag_capture_command",
+        required=True,
+    )
+    rag_capture_dify = rag_capture_subparsers.add_parser(
+        "dify-knowledge",
+        help="Capture Dify Knowledge API retrieval evidence",
+    )
+    rag_capture_dify.add_argument(
+        "--base-url",
+        help="Dify knowledge API base URL",
+    )
+    rag_capture_dify.add_argument(
+        "--knowledge-key-env",
+        default="DIFY_KNOWLEDGE_API_KEY",
+        help="Environment variable containing the Dify knowledge API key",
+    )
+    rag_capture_dify.add_argument(
+        "--dataset-id",
+        help="Dify dataset ID; defaults to DIFY_DATASET_ID",
+    )
+    rag_capture_dify.add_argument(
+        "--query",
+        required=True,
+        help="Query to send to the Dify Knowledge API",
+    )
+    rag_capture_dify.add_argument(
+        "--top-k",
+        type=int,
+        default=3,
+        help="Requested Dify retrieval top_k",
+    )
+    rag_capture_dify.add_argument(
+        "--case-id",
+        help="Optional RAG Case ID to associate with this trace",
+    )
+    rag_capture_dify.add_argument(
+        "--include-content",
+        action="store_true",
+        help="Explicitly retain query and retrieved chunk text in the trace",
+    )
+    rag_capture_dify.add_argument(
+        "--timeout",
+        type=_positive_float,
+        default=30.0,
+    )
+    rag_capture_dify.add_argument(
+        "--allow-non-local",
+        action="store_true",
+    )
+    rag_capture_dify.add_argument(
+        "--allow-public",
+        action="store_true",
+    )
+    rag_capture_dify.add_argument(
+        "--output",
+        required=True,
+        help="Write the captured RAG Trace JSON to this path",
+    )
+
+    rag_trace = rag_subparsers.add_parser("trace", help="Validate RAG Trace files")
+    rag_trace_subparsers = rag_trace.add_subparsers(dest="rag_trace_command", required=True)
+    rag_trace_validate = rag_trace_subparsers.add_parser("validate", help="Validate a RAG Trace JSON file")
+    rag_trace_validate.add_argument("path")
+    rag_trace_validate.add_argument("--format", choices=("console", "json", "markdown"), default="console")
+    rag_trace_validate.add_argument("--output")
+    rag_diagnose = rag_subparsers.add_parser("diagnose", help="Diagnose one RAG Case + Trace with layered deterministic evidence")
+    rag_diagnose.add_argument("--case", required=True)
+    rag_diagnose.add_argument("--trace", required=True)
+    rag_diagnose.add_argument("--format", choices=("console", "json", "markdown"), default="console")
+    rag_diagnose.add_argument("--output")
+    rag_compare = rag_subparsers.add_parser("compare", help="Compare before/after RAG traces for one Case")
+    rag_compare.add_argument("--case", required=True)
+    rag_compare.add_argument("--before", required=True)
+    rag_compare.add_argument("--after", required=True)
+    rag_compare.add_argument("--format", choices=("console", "json", "markdown"), default="console")
+    rag_compare.add_argument("--output")
+    rag_probe = rag_subparsers.add_parser("probe", help="Run bounded RAG diagnostic probes")
+    rag_probe_subparsers = rag_probe.add_subparsers(dest="rag_probe_command", required=True)
+    rag_gold = rag_probe_subparsers.add_parser("gold-context", help="Probe whether a model can answer when explicit gold context is supplied")
+    rag_gold.add_argument("--case", required=True)
+    rag_gold.add_argument("--context-file", required=True)
+    rag_gold.add_argument("--endpoint", required=True)
+    rag_gold.add_argument("--model", required=True)
+    rag_gold.add_argument("--api-key-env", help="Environment variable containing an API key, if needed")
+    rag_gold.add_argument("--timeout", type=_positive_float, default=30.0)
+    rag_gold.add_argument("--dry-run", action="store_true")
+    rag_gold.add_argument("--allow-non-local", action="store_true")
+    rag_gold.add_argument("--allow-public", action="store_true")
+    rag_gold.add_argument("--retain-answer", action="store_true", help="Retain a short generated answer preview in the report")
+    rag_gold.add_argument("--format", choices=("console", "json", "markdown"), default="console")
+    rag_gold.add_argument("--output")
+
+    def add_dify_compose_options(command):
+        command.add_argument("--compose-file", help="Dify Docker Compose file to inspect read-only")
+        command.add_argument("--project-directory", help="Directory containing compose.yaml or docker-compose.yaml")
+        command.add_argument("--project-name", help="Optional Compose project name used for report context")
+        command.add_argument("--format", choices=("console", "json", "markdown"), default="console")
+        command.add_argument("--output", help="Write output to this file")
+
+    dify_selfhost = dify_subparsers.add_parser("selfhost", help="Read-only self-hosted Dify deployment diagnostics")
+    dify_selfhost_subparsers = dify_selfhost.add_subparsers(dest="dify_selfhost_command", required=True)
+    dify_selfhost_preflight = dify_selfhost_subparsers.add_parser("preflight", help="Check host, Docker, Compose, and service readiness without starting anything")
+    add_dify_compose_options(dify_selfhost_preflight)
+    dify_selfhost_inspect = dify_selfhost_subparsers.add_parser("inspect", help="Inspect an existing selected Dify Compose deployment read-only")
+    add_dify_compose_options(dify_selfhost_inspect)
+    dify_selfhost_inspect.add_argument("--since", default="10m", help="Bounded log window for --details, for example 10m")
+    dify_selfhost_inspect.add_argument("--services", help="Comma-separated service names or roles to inspect")
+    dify_selfhost_inspect.add_argument("--details", action="store_true", help="Collect bounded redacted log signatures for failed or selected services")
+
+    dify_connectivity = dify_subparsers.add_parser("connectivity", help="Diagnose model endpoint connectivity across host, containers, and Dify layers")
+    dify_connectivity_subparsers = dify_connectivity.add_subparsers(dest="dify_connectivity_command", required=True)
+    dify_connectivity_check = dify_connectivity_subparsers.add_parser("check", help="Run layered model connectivity diagnosis")
+    add_dify_compose_options(dify_connectivity_check)
+    dify_connectivity_check.add_argument("--endpoint", help="Model endpoint URL to test, for example http://192.168.1.20:8000/v1")
+    dify_connectivity_check.add_argument("--runtime", choices=("auto", "openai-compatible", "ollama", "vllm", "sglang", "xinference"), default="auto")
+    dify_connectivity_check.add_argument("--role", choices=("chat", "embedding", "rerank", "tool"), default="chat")
+    dify_connectivity_check.add_argument("--services", help="Comma-separated service names or roles for container probes")
+    dify_connectivity_check.add_argument("--path", help="Optional endpoint route to probe instead of /models")
+    dify_connectivity_check.add_argument("--through-dify", action="store_true", help="Include Dify-mediated provider path evidence when app API options are supplied")
+    dify_connectivity_check.add_argument("--app-api-base", help="Published Dify app API base for Dify-mediated checks")
+    dify_connectivity_check.add_argument("--app-key-env", default="DIFY_APP_API_KEY", help="Environment variable containing the Dify app API key")
+    dify_connectivity_check.add_argument("--allow-non-local", action="store_true", help="Allow a bounded probe to a LAN/private endpoint you control")
+    dify_connectivity_check.add_argument("--allow-public", action="store_true", help="Allow a bounded probe to an explicitly supplied public endpoint")
+    dify_connectivity_check.add_argument("--details", action="store_true", help="Attempt bounded read-only probes from detected containers")
+
+    dify_evidence = dify_subparsers.add_parser("evidence", help="Collect and explain bounded redacted Dify evidence bundles")
+    dify_evidence_subparsers = dify_evidence.add_subparsers(dest="dify_evidence_command", required=True)
+    dify_evidence_collect = dify_evidence_subparsers.add_parser("collect", help="Collect a bounded redacted self-host evidence bundle")
+    add_dify_compose_options(dify_evidence_collect)
+    dify_evidence_collect.add_argument("--since", default="10m")
+    dify_evidence_collect.add_argument("--services", help="Comma-separated service names or roles")
+    dify_evidence_collect.add_argument("--details", action="store_true", help="Collect bounded redacted log signatures")
+    dify_evidence_explain = dify_evidence_subparsers.add_parser("explain", help="Explain a saved Dify evidence bundle")
+    dify_evidence_explain.add_argument("bundle", help="Evidence bundle JSON path")
+    dify_evidence_explain.add_argument("--format", choices=("console", "json", "markdown"), default="console")
+    dify_evidence_explain.add_argument("--output", help="Write output to this file")
 
     report = subparsers.add_parser(
         "report",
@@ -823,6 +1444,32 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if args.command == "explain":
         print(render_explanation(args.topic))
         return 0
+    if args.command == "provider":
+        try:
+            if args.provider_command == "list":
+                print(render_provider_list(list_provider_presets()))
+                return 0
+            provider = get_provider_preset(args.provider)
+            if args.provider_command == "show":
+                print(render_provider_show(provider))
+                return 0
+            result = run_provider_check(
+                provider,
+                api_key=os.environ.get(provider.api_key_env),
+                timeout=args.timeout,
+                allow_non_local=args.allow_non_local,
+                allow_public=args.allow_public,
+                smoke=args.smoke,
+                model=args.model,
+            )
+            _emit_output(
+                render_provider_check(result, args.format),
+                args.output,
+            )
+            return 1 if result.get("status") == "FAIL" else 0
+        except ProviderError as exc:
+            print("inferdoctor: {0}".format(exc), file=sys.stderr)
+            return 2
     if args.command == "experience":
         if args.experience_command == "profile":
             print(render_experience_profile(get_profile(args.name)))
@@ -938,8 +1585,6 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 if args.baseline_command == "show":
                     baseline = load_report_or_baseline(args.baseline)
                     if args.format == "json":
-                        import json
-
                         rendered = json.dumps(baseline, indent=2, sort_keys=True)
                     elif args.format == "markdown":
                         rendered = render_baseline_markdown(baseline, args.baseline)
@@ -960,6 +1605,609 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             except ValueError as exc:
                 print("inferdoctor: {0}".format(exc), file=sys.stderr)
                 return 2
+
+
+    if args.command == "cognitive":
+        try:
+            if (
+                args.cognitive_command
+                == "case"
+                and args.cognitive_case_command
+                == "init"
+            ):
+                output = (
+                    init_cognitive_case_template(
+                        args.output
+                    )
+                )
+
+                print(
+                    "Wrote Cognitive Case template: {0}".format(
+                        output
+                    )
+                )
+
+                return 0
+
+            if (
+                args.cognitive_command
+                == "case"
+                and args.cognitive_case_command
+                == "validate"
+            ):
+                result = (
+                    validate_cognitive_case_file(
+                        args.path
+                    )
+                )
+
+                print(
+                    "Cognitive Case validation: {0}".format(
+                        result["status"]
+                    )
+                )
+
+                for error in result.get(
+                    "errors",
+                    [],
+                ):
+                    print(
+                        "- {0}".format(
+                            error
+                        )
+                    )
+
+                return (
+                    1
+                    if result["status"]
+                    == "FAIL"
+                    else 0
+                )
+
+            if (
+                args.cognitive_command
+                == "diagnose"
+            ):
+                result = (
+                    evaluate_cognitive_case(
+                        load_cognitive_case(
+                            args.case
+                        ),
+                        load_cognitive_trace(
+                            args.trace
+                        ),
+                    )
+                )
+
+                rendered = (
+                    render_cognitive_analysis(
+                        result
+                    )
+                )
+
+                _emit_output(
+                    rendered,
+                    args.output,
+                )
+
+                return (
+                    1
+                    if result[
+                        "semantic_status"
+                    ]
+                    == "FAIL"
+                    else 0
+                )
+
+            if (
+                args.cognitive_command
+                == "probe"
+                and args.cognitive_probe_command
+                == "next"
+            ):
+                analysis = (
+                    evaluate_cognitive_case(
+                        load_cognitive_case(
+                            args.case
+                        ),
+                        load_cognitive_trace(
+                            args.trace
+                        ),
+                    )
+                )
+
+                plan = (
+                    plan_next_cognitive_probe(
+                        analysis
+                    )
+                )
+
+                if args.format == "json":
+                    rendered = json.dumps(
+                        plan,
+                        indent=2,
+                        sort_keys=True,
+                    )
+                else:
+                    rendered = (
+                        render_probe_plan(
+                            plan
+                        )
+                    )
+
+                _emit_output(
+                    rendered,
+                    args.output,
+                )
+
+                return 0
+
+
+            if (
+                args.cognitive_command
+                == "import"
+                and args.cognitive_import_command
+                == "openinference"
+            ):
+                result = (
+                    load_openinference_trace(
+                        args.input
+                    )
+                )
+
+                Path(
+                    args.output
+                ).write_text(
+                    json.dumps(
+                        result,
+                        indent=2,
+                        sort_keys=True,
+                        ensure_ascii=False,
+                    )
+                    + "\n",
+                    encoding="utf-8",
+                )
+
+                print(
+                    "Wrote Cognitive Trace: {0}".format(
+                        args.output
+                    )
+                )
+
+                print(
+                    "mapped spans: {0}".format(
+                        result[
+                            "adapter"
+                        ][
+                            "mapped_span_count"
+                        ]
+                    )
+                )
+
+                return 0
+
+            if (
+                args.cognitive_command
+                == "probe"
+                and args.cognitive_probe_command
+                == "gold-context"
+            ):
+                cognitive_analysis = (
+                    evaluate_cognitive_case(
+                        load_cognitive_case(
+                            args.cognitive_case
+                        ),
+                        load_cognitive_trace(
+                            args.cognitive_trace
+                        ),
+                    )
+                )
+
+                rag_case = load_case(
+                    args.rag_case
+                )
+
+                context_text = Path(
+                    args.context_file
+                ).read_text(
+                    encoding="utf-8"
+                )
+
+                api_key = None
+
+                if args.api_key_env:
+
+                    api_key = os.environ.get(
+                        args.api_key_env
+                    )
+
+                result = (
+                    run_cognitive_gold_context_probe(
+                        cognitive_analysis,
+                        rag_case,
+                        context_text=context_text,
+                        endpoint=args.endpoint,
+                        model=args.model,
+                        timeout=args.timeout,
+                        dry_run=args.dry_run,
+                        allow_non_local=args.allow_non_local,
+                        allow_public=args.allow_public,
+                        api_key=api_key,
+                        retain_answer=args.retain_answer,
+                    )
+                )
+
+                if args.format == "json":
+                    rendered = json.dumps(
+                        result,
+                        indent=2,
+                        sort_keys=True,
+                        ensure_ascii=False,
+                    )
+                else:
+                    rendered = (
+                        render_cognitive_gold_context(
+                            result
+                        )
+                    )
+
+                _emit_output(
+                    rendered,
+                    args.output,
+                )
+
+                return (
+                    1
+                    if result["verdict"]
+                    in {
+                        "GOLD_CONTEXT_FAIL",
+                        "PROBE_FAILED",
+                    }
+                    else 0
+                )
+
+            if (
+                args.cognitive_command
+                == "probe"
+                and args.cognitive_probe_command
+                == "gold-context"
+            ):
+                cognitive_analysis = (
+                    evaluate_cognitive_case(
+                        load_cognitive_case(
+                            args.cognitive_case
+                        ),
+                        load_cognitive_trace(
+                            args.cognitive_trace
+                        ),
+                    )
+                )
+
+                rag_case = load_case(
+                    args.rag_case
+                )
+
+                context_text = Path(
+                    args.context_file
+                ).read_text(
+                    encoding="utf-8"
+                )
+
+                api_key = None
+
+                if args.api_key_env:
+
+                    api_key = os.environ.get(
+                        args.api_key_env
+                    )
+
+                result = (
+                    run_cognitive_gold_context_probe(
+                        cognitive_analysis,
+                        rag_case,
+                        context_text=context_text,
+                        endpoint=args.endpoint,
+                        model=args.model,
+                        timeout=args.timeout,
+                        dry_run=args.dry_run,
+                        allow_non_local=args.allow_non_local,
+                        allow_public=args.allow_public,
+                        api_key=api_key,
+                        retain_answer=args.retain_answer,
+                    )
+                )
+
+                if args.format == "json":
+                    rendered = json.dumps(
+                        result,
+                        indent=2,
+                        sort_keys=True,
+                        ensure_ascii=False,
+                    )
+                else:
+                    rendered = (
+                        render_cognitive_gold_context(
+                            result
+                        )
+                    )
+
+                _emit_output(
+                    rendered,
+                    args.output,
+                )
+
+                return (
+                    1
+                    if result["verdict"]
+                    in {
+                        "GOLD_CONTEXT_FAIL",
+                        "PROBE_FAILED",
+                    }
+                    else 0
+                )
+
+            if (
+                args.cognitive_command
+                == "replay"
+                and args.cognitive_replay_command
+                == "compare"
+            ):
+                result = compare_controlled_replay(
+                    load_cognitive_case(
+                        args.case
+                    ),
+                    load_cognitive_trace(
+                        args.before
+                    ),
+                    load_cognitive_trace(
+                        args.after
+                    ),
+                    target_layer=(
+                        args.target_layer
+                    ),
+                    probe_name=(
+                        args.probe_name
+                    ),
+                )
+
+                if args.format == "json":
+                    rendered = json.dumps(
+                        result,
+                        indent=2,
+                        sort_keys=True,
+                    )
+                else:
+                    rendered = (
+                        render_replay_comparison(
+                            result
+                        )
+                    )
+
+                _emit_output(
+                    rendered,
+                    args.output,
+                )
+
+                return (
+                    1
+                    if result["verdict"]
+                    in {
+                        "INVALID_BASELINE",
+                        "TARGET_NOT_ISOLATED",
+                        "REGRESSED",
+                    }
+                    else 0
+                )
+
+        except (
+            ValueError,
+            OSError,
+            json.JSONDecodeError,
+        ) as exc:
+            print(
+                "inferdoctor: {0}".format(
+                    exc
+                ),
+                file=sys.stderr,
+            )
+
+            return 2
+
+    if args.command == "rag":
+        try:
+            if args.rag_command == "case":
+                if args.rag_case_command == "init":
+                    output = init_case_template(args.output)
+                    print("Wrote RAG Case template: {0}".format(output))
+                    return 0
+                if args.rag_case_command == "validate":
+                    result = validate_case_file(args.path)
+                    _emit_output(render_rag_result(result, args.format), args.output)
+                    return 1 if result.get("status") == "FAIL" else 0
+            if (
+                args.rag_command == "capture"
+                and args.rag_capture_command == "dify-knowledge"
+            ):
+                config = load_dify_config(
+                    knowledge_base_url=args.base_url,
+                    knowledge_key_env=args.knowledge_key_env,
+                    dataset_id=args.dataset_id,
+                    timeout=args.timeout,
+                    allow_non_local=args.allow_non_local,
+                    allow_public=args.allow_public,
+                )
+
+                result = capture_dify_knowledge_trace(
+                    config,
+                    query=args.query,
+                    top_k=args.top_k,
+                    include_content=args.include_content,
+                    case_id=args.case_id,
+                )
+
+                Path(args.output).write_text(
+                    json.dumps(
+                        result,
+                        indent=2,
+                        sort_keys=True,
+                        ensure_ascii=False,
+                    )
+                    + "\n",
+                    encoding="utf-8",
+                )
+
+                print(
+                    "Wrote Dify RAG Trace: {0}".format(
+                        args.output
+                    )
+                )
+
+                return 0
+
+            if args.rag_command == "trace" and args.rag_trace_command == "validate":
+                result = validate_trace_file(args.path)
+                _emit_output(render_rag_result(result, args.format), args.output)
+                return 1 if result.get("status") == "FAIL" else 0
+            if args.rag_command == "diagnose":
+                result = diagnose_rag(load_case(args.case), load_trace(args.trace))
+                _emit_output(render_rag_result(result, args.format), args.output)
+                return 1 if result.get("status") == "FAIL" else 0
+            if args.rag_command == "compare":
+                result = compare_rag(load_case(args.case), load_trace(args.before), load_trace(args.after))
+                _emit_output(render_rag_result(result, args.format), args.output)
+                return 1 if result.get("verdict") in {"regressed", "incompatible"} else 0
+            if args.rag_command == "probe" and args.rag_probe_command == "gold-context":
+                api_key = None
+                if args.api_key_env:
+                    api_key = os.environ.get(args.api_key_env)
+                context_text = Path(args.context_file).read_text(encoding="utf-8")
+                result = run_gold_context_probe(load_case(args.case), context_text=context_text, endpoint=args.endpoint, model=args.model, timeout=args.timeout, dry_run=args.dry_run, allow_non_local=args.allow_non_local, allow_public=args.allow_public, api_key=api_key, retain_answer=args.retain_answer)
+                _emit_output(render_rag_result(result, args.format), args.output)
+                return 1 if result.get("status") == "FAIL" else 0
+        except (RagError, OSError, json.JSONDecodeError) as exc:
+            print("inferdoctor: {0}".format(exc), file=sys.stderr)
+            return 2
+
+    if args.command == "dify":
+        try:
+            if args.dify_command == "check":
+                config = load_dify_config(base_url=args.base_url, app_key_env=args.app_key_env, timeout=args.timeout, allow_non_local=args.allow_non_local, allow_public=args.allow_public)
+                result = run_dify_check(config)
+                _emit_output(render_dify_check(result, args.format), args.output)
+                return 1 if result.get("status") == "FAIL" else 0
+            if args.dify_command == "template":
+                if args.dify_template_command == "list":
+                    print(render_dify_template_list())
+                    return 0
+                if args.dify_template_command == "show":
+                    print(render_dify_template_show(args.name))
+                    return 0
+                if args.dify_template_command == "export":
+                    written = export_dify_template(args.name, args.output, overwrite=args.overwrite)
+                    print(render_dify_template_export(args.name, args.output, written))
+                    return 0
+            if args.dify_command == "validate":
+                result = validate_dify_kit(args.path)
+                _emit_output(render_dify_validation(result, args.format), args.output)
+                return 1 if result.get("status") == "FAIL" else 0
+            if args.dify_command == "smoke":
+                config = load_dify_config(base_url=args.base_url, app_key_env=args.app_key_env, timeout=args.timeout, allow_non_local=args.allow_non_local, allow_public=args.allow_public)
+                result = run_dify_smoke(config, kit_path=args.kit, dry_run=args.dry_run, query=args.query, show_answer=args.show_answer)
+                _emit_output(render_dify_smoke(result, args.format), args.output)
+                return 1 if result.get("status") == "FAIL" else 0
+            if args.dify_command == "perf":
+                config = load_dify_config(base_url=args.base_url, app_key_env=args.app_key_env, timeout=args.timeout, allow_non_local=args.allow_non_local, allow_public=args.allow_public)
+                result = run_dify_perf(config, runs=args.runs, warmup=args.warmup, profile=args.profile, query=args.query)
+                _emit_output(render_dify_perf(result, args.format), args.output)
+                return 1 if result.get("failed_runs", 0) and not result.get("successful_runs", 0) else 0
+            if args.dify_command == "optimize":
+                result = optimize_dify(report_path=args.report, kit_path=args.kit, retrieval_ms=args.retrieval_ms, rerank_ms=args.rerank_ms, profile=args.profile)
+                _emit_output(render_dify_optimize(result, args.format), args.output)
+                return 0
+            if args.dify_command == "knowledge" and args.dify_knowledge_command == "check":
+                config = load_dify_config(knowledge_base_url=args.base_url, knowledge_key_env=args.knowledge_key_env, dataset_id=args.dataset_id, timeout=args.timeout, allow_non_local=args.allow_non_local, allow_public=args.allow_public)
+                result = run_dify_knowledge_check(config, query=args.query, show_content=args.show_content)
+                _emit_output(render_dify_knowledge(result, args.format), args.output)
+                return 1 if result.get("status") == "FAIL" else 0
+            if (
+                args.dify_command == "trace"
+                and args.dify_trace_command == "capture"
+            ):
+                config = load_dify_config(
+                    base_url=args.base_url,
+                    app_key_env=args.app_key_env,
+                    timeout=args.timeout,
+                    allow_non_local=args.allow_non_local,
+                    allow_public=args.allow_public,
+                )
+
+                result = capture_dify_cognitive_trace(
+                    config,
+                    query=args.query,
+                )
+
+                Path(args.output).write_text(
+                    json.dumps(
+                        result,
+                        indent=2,
+                        sort_keys=True,
+                        ensure_ascii=False,
+                    )
+                    + "\n",
+                    encoding="utf-8",
+                )
+
+                print(
+                    "Wrote Dify cognitive trace: {0}".format(
+                        args.output
+                    )
+                )
+
+                print(
+                    render_cognitive_analysis(
+                        result["analysis"]
+                    )
+                )
+
+                return (
+                    1
+                    if result[
+                        "analysis"
+                    ][
+                        "execution_status"
+                    ]
+                    == "FAIL"
+                    else 0
+                )
+
+            if args.dify_command == "selfhost":
+                if args.dify_selfhost_command == "preflight":
+                    result = run_dify_selfhost_preflight(compose_file=args.compose_file, project_directory=args.project_directory, project_name=args.project_name)
+                    _emit_output(render_reliability_report(result, args.format), args.output)
+                    return 1 if result.get("status") == "BLOCKED" else 0
+                if args.dify_selfhost_command == "inspect":
+                    services = args.services.split(",") if args.services else None
+                    result = run_dify_selfhost_inspect(compose_file=args.compose_file, project_directory=args.project_directory, project_name=args.project_name, since=args.since, services=services, details=args.details)
+                    _emit_output(render_reliability_report(result, args.format), args.output)
+                    return 1 if result.get("status") == "BLOCKED" else 0
+            if args.dify_command == "connectivity" and args.dify_connectivity_command == "check":
+                services = args.services.split(",") if args.services else None
+                result = run_dify_connectivity_check(endpoint=args.endpoint, runtime=args.runtime, role=args.role, compose_file=args.compose_file, project_directory=args.project_directory, project_name=args.project_name, services=services, path=args.path, through_dify=args.through_dify, app_api_base=args.app_api_base, app_key_env=args.app_key_env, allow_non_local=args.allow_non_local, allow_public=args.allow_public, details=args.details)
+                _emit_output(render_reliability_report(result, args.format), args.output)
+                return 1 if result.get("status") == "FAIL" else 0
+            if args.dify_command == "evidence":
+                if args.dify_evidence_command == "collect":
+                    services = args.services.split(",") if args.services else None
+                    result = run_dify_evidence_collect(compose_file=args.compose_file, project_directory=args.project_directory, project_name=args.project_name, since=args.since, services=services, details=args.details)
+                    _emit_output(render_reliability_report(result, args.format), args.output)
+                    return 0
+                if args.dify_evidence_command == "explain":
+                    result = run_dify_evidence_explain(args.bundle)
+                    _emit_output(render_reliability_report(result, args.format), args.output)
+                    return 0
+        except (DifyError, KeyError, OSError, json.JSONDecodeError) as exc:
+            print("inferdoctor: {0}".format(exc), file=sys.stderr)
+            return 2
 
     if args.command == "recommend":
         print(

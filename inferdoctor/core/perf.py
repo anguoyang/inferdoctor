@@ -11,7 +11,11 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from urllib.request import Request, urlopen
 
 from inferdoctor import __version__
-from inferdoctor.core.http import HTTPCheckError, describe_http_error, join_url
+from inferdoctor.core.http import HTTPCheckError, describe_http_error
+from inferdoctor.core.openai_compatible import (
+    chat_completions_url as _chat_url,
+    models_url as _models_url,
+)
 
 SMOKE_PROMPT = "Reply with one short sentence: local AI endpoint smoke test."
 MAX_BODY_BYTES = 1024 * 1024
@@ -104,20 +108,6 @@ def sanitize_endpoint(url: str) -> str:
         else:
             query_items.append((key, value))
     return urlunsplit((parts.scheme, host, parts.path, urlencode(query_items), ""))
-
-
-def _models_url(base_url: str) -> str:
-    normalized = base_url.rstrip("/")
-    if urlsplit(normalized).path.rstrip("/").endswith("/v1"):
-        return join_url(normalized, "models")
-    return join_url(normalized, "v1/models")
-
-
-def _chat_url(base_url: str) -> str:
-    normalized = base_url.rstrip("/")
-    if urlsplit(normalized).path.rstrip("/").endswith("/v1"):
-        return join_url(normalized, "chat/completions")
-    return join_url(normalized, "v1/chat/completions")
 
 
 def _headers() -> Dict[str, str]:

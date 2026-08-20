@@ -1,57 +1,49 @@
-# v0.4.0 Release Checklist
+# v0.7.0 Release Candidate Checklist
 
-This checklist is public-facing release preparation for InferDoctor v0.4.0. It should stay free of private workflow notes, transcripts, and internal planning artifacts.
+This checklist prepares InferDoctor v0.7.0 for a human-controlled `dev` to `main` release. It intentionally excludes private credentials, live provider evidence, request IDs, and publication actions.
 
-## Product Experience
+## Release Scope
 
-- [x] `inferdoctor` shows the local AI stack health dashboard without a subcommand.
-- [x] `inferdoctor recommend` explains a practical setup direction for common goals.
-- [x] `inferdoctor stack plan` gives beginner-friendly next actions.
-- [x] `inferdoctor template list` and `inferdoctor template show` explain available starter projects.
-- [x] `inferdoctor template create` generates customer service, restaurant ordering, and local document Q&A starters.
-- [x] `inferdoctor template validate` checks generated projects without running inference.
-- [x] `inferdoctor init` supports a guided setup path.
-- [x] `inferdoctor model fit` gives clearly labeled heuristic fit guidance.
+- [x] Dify application diagnostics and safe orchestration tracing are documented.
+- [x] RAG Intelligence, cognitive-path diagnosis, and First Broken Layer attribution are documented.
+- [x] Controlled Cognitive Replay, Gold Context probes, and the Minimal Next Probe Planner are included.
+- [x] OpenInference / OTLP trace adaptation is included.
+- [x] Provider metadata reuses the shared OpenAI-compatible transport.
+- [x] OrcaRouter remains a provider preset rather than an architectural dependency.
+- [x] Provider Check is bounded and does not include Provider Compare, pricing data, routing, or recommendation ranking.
 
-## Safety
+## Security and Evidence Boundaries
 
-- [x] No heavy AI runtime dependencies were added.
-- [x] No model download command was added.
-- [x] No model execution command was added.
-- [x] No automatic runtime installation was added.
-- [x] Diagnostics remain read-only by default.
-- [x] Template generation writes only to an explicit output directory.
-- [x] Recommendations and model-fit estimates are documented as heuristics, not benchmarks.
+- [x] API keys and optional response content are not rendered or retained.
+- [x] Malformed API keys fail before a request is sent.
+- [x] Credentials embedded in provider endpoint URLs are rejected.
+- [x] Public endpoints require `--allow-public` and private/LAN endpoints require `--allow-non-local`.
+- [x] Model catalog presence does not prove model invocation access.
+- [x] HTTP 401 authentication failure and HTTP 403 model-access denial remain distinct.
+- [x] Unsupported probes and missing evidence remain `UNKNOWN`.
+- [x] Partner metadata cannot influence diagnostic results or recommendations.
+- [x] No live external provider call is required by automated validation.
 
 ## Validation
 
-- [x] CLI smoke test: `inferdoctor`.
-- [x] CLI help smoke test: key command groups render help cleanly.
-- [x] Generated template smoke test: create customer service, restaurant ordering, and local document Q&A starters.
-- [x] Template validation smoke test: validate generated starter projects.
-- [x] Wheel build smoke test: `python -m build`.
-- [x] Package metadata check: `twine check dist/*`.
-- [x] Clean wheel install smoke test in a temporary virtual environment.
-- [x] Unit tests: `pytest`.
-- [x] Documentation review for install wording, safety claims, and beginner flow.
-- [x] README install wording does not claim PyPI availability before publication.
-- [x] Public release notes draft exists for v0.4.0.
-- [x] Internal artifact scan is part of pre-commit/final validation.
+- [x] Python source compilation passes.
+- [x] Full `pytest` suite passes.
+- [x] Existing README/PyPI link validation passes.
+- [x] `git diff --check` passes.
+- [x] Package build succeeds with the existing `python -m build` workflow.
+- [x] Existing `twine check` package metadata validation passes.
+- [x] Built wheel installs and passes CLI/version smoke tests in a clean temporary environment.
+- [x] Distribution artifacts contain no obvious credentials or private release artifacts.
 
 ## Release Preparation
 
-- [x] Confirm package and module versions are `0.4.0` on the release branch.
+- [x] Canonical package and module versions are synchronized at `0.7.0`.
+- [x] `CHANGELOG.md` summarizes the v0.7 milestone and evidence boundaries.
+- [x] Public release notes exist at `docs/releases/v0.7.0.md`.
+- [x] README links use the existing absolute-link convention for GitHub and PyPI rendering.
 - [ ] Confirm GitHub Actions passes on the final `dev` commit.
-- [ ] Review final diff before merging `dev` to `main`.
-- [ ] Merge `dev` to `main` only when v0.4.0 is approved for release.
-- [ ] Create and push tag `v0.4.0` only after the release merge.
-- [ ] Publish GitHub Release notes from `docs/releases/v0.4.0.md`.
-- [ ] Run PyPI readiness check before publishing.
-- [ ] Publish to PyPI only when credentials and release approval are explicitly available.
-
-## v0.4.0 Setup-Assistant Smoke Tests
-
-- [x] Run  against a generated customer-service template.
-- [x] Run .
-- [x] Confirm golden demo outputs exist under .
-- [x] Confirm README install wording does not claim PyPI availability before publish.
+- [ ] Review the final `dev` to `main` diff.
+- [ ] Merge `dev` to `main` only after release approval.
+- [ ] Create and push tag `v0.7.0` only after the release merge.
+- [ ] Create the GitHub release from `docs/releases/v0.7.0.md`.
+- [ ] Publish to PyPI only after explicit human approval and credential availability.

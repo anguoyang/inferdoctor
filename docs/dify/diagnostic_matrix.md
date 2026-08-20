@@ -1,0 +1,27 @@
+# Dify Diagnostic Matrix
+
+InferDoctor uses this public matrix to keep Dify diagnostics issue-driven without turning into a raw log viewer. It groups common self-hosted symptoms by likely layer, bounded evidence, and safe next action. The matrix is not a statistical claim about all Dify installations.
+
+| User-visible symptom | Possible layers | Evidence InferDoctor can collect | Checks InferDoctor performs | What InferDoctor cannot know | Safe next action | Future specialist module |
+| --- | --- | --- | --- | --- | --- | --- |
+| Upgrade fails or old knowledge bases stop working | Dify version drift, migrations, Plugin Daemon, Sandbox, SSRF Proxy, vector store | Compose service versions, image tags, restart counts, migration-like log signatures, env-key presence | selfhost inspect, evidence collect, bounded log signatures | Whether a manual migration was skipped unless visible in logs | Save an evidence bundle before changing versions | Upgrade Guardian v0.8 candidate |
+| Local model unreachable from Dify | Docker networking, endpoint binding, DNS, gateway, firewall | Host probe, container probe, endpoint classification, base-path response | connectivity check with host/container layers | Private firewall policy not visible from the selected host | Verify model endpoint from API/Worker containers | Model Connectivity Doctor |
+| Model list empty after provider configuration | Provider plugin, base URL, auth, SSRF Proxy, runtime route | HTTP status, 401/403/404 signatures, Plugin Daemon state, SSRF evidence | connectivity check, selfhost inspect | Provider UI state unless exposed by app/API/logs | Separate network success from provider/plugin failure | Provider Doctor |
+| Chat works but embedding fails | Embedding role, model capability, provider config, vector pipeline | Requested role, endpoint/protocol evidence, Worker/indexing errors | connectivity check --role embedding | Model semantic quality or hidden provider-side settings | Test embedding role separately from chat | RAG Doctor later milestone |
+| Plugin Daemon unavailable | Plugin Daemon, DB, Redis, proxy, Marketplace/PyPI/certificate/DNS | service role, health/restart count, bounded plugin log signatures | selfhost inspect, evidence collect | Marketplace account state unless logged | Fix Plugin Daemon before debugging downstream provider errors | Plugin Doctor |
+| Plugin not found | Plugin installation, daemon state, version mismatch | plugin-not-found signatures, daemon restarts, image mismatch | inspect, evidence explain | User intended plugin version unless configured | Confirm daemon health and plugin availability | Plugin Doctor |
+| Sandbox network error | Sandbox, Docker network, SSRF Proxy, DNS | sandbox service state, network attachments, connection errors | selfhost inspect | Code content if not supplied | Check Sandbox and SSRF Proxy before app logic | Sandbox Doctor |
+| SSRF rejection | SSRF Proxy, endpoint policy, private address allowlist | SSRF service state, 403/rejection signatures, endpoint classification | connectivity check, evidence explain | Exact Studio policy unless visible in config/logs | Treat raw network pass plus Dify-mediated fail as security path evidence | SSRF Doctor |
+| Knowledge indexing stuck | Worker, queue, embedding model, vector DB | Worker state, restart count, indexing signatures, vector-store role | selfhost inspect, evidence collect | Queue depth if not visible through safe APIs/logs | Inspect Worker and embedding role before blaming retrieval | RAG Doctor later milestone |
+| Retrieval test works but Workflow retrieval is empty | Workflow variables, dataset binding, Worker, retrieval node config | DSL validation, unresolved resources, Worker errors | dify validate, evidence explain | App canvas state after manual edits | Validate selectors and dataset binding | RAG Doctor later milestone |
+| Vector-store incompatibility | Vector DB, embedding dimension, schema/version drift | vector role, image tag, dimension/schema-like error signatures | selfhost inspect, evidence collect | Actual collection schema without DB access | Preserve vector-store evidence for upgrade review | Upgrade Guardian v0.8 candidate |
+| Worker restart or thread exhaustion | Worker, host resource limits, queue pressure | restart count, OOM/thread signatures, host process limits | selfhost preflight, inspect | Exact workload volume | Fix Worker stability before tuning RAG | Production scaling doctor later milestone |
+| Internal Server Error | API, Worker, Plugin Daemon, DB, Redis, model provider | first failing component, status codes, bounded logs | evidence collect/explain | Hidden request payload unless user supplies it | Collect bounded evidence and rank root candidates | Evidence Bundle Foundation |
+| Workflow variable or reference failure | DSL, Chatflow graph, app configuration | DSL selectors, unresolved placeholders, workflow error signatures | dify validate, smoke, evidence explain | Manual canvas edits not exported | Revalidate DSL and resource binding | Workflow Doctor later milestone |
+
+## Scope Notes
+
+- v0.7 focuses on self-host preflight, read-only inspection, model connectivity, and evidence bundles.
+- Upgrade Guardian, full RAG Doctor, and production scaling diagnostics are intentionally future modules.
+- InferDoctor distinguishes observed evidence from inferred root-cause candidates and downstream symptoms.
+- Reports are bounded and redacted by default.

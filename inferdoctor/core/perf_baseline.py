@@ -78,6 +78,8 @@ def _metrics_from_report(report: Dict[str, Any]) -> Dict[str, Any]:
 def _is_supported_perf_report_schema(schema_version: str) -> bool:
     if schema_version == REPORT_SCHEMA_VERSION:
         return True
+    if schema_version == "inferdoctor.dify.performance.v1":
+        return True
     return schema_version.startswith("inferdoctor.perf.v")
 
 

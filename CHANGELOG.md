@@ -2,7 +2,27 @@
 
 ## Unreleased
 
-- No unreleased changes.
+### v0.7.0 Release Candidate
+
+#### Highlights
+
+- Added Dify application diagnostics, safe orchestration tracing, Local / Private RAG kit workflows, performance smoke reports, and read-only knowledge retrieval checks.
+- Added framework-neutral RAG Intelligence with evidence normalization, layered diagnosis, comparison, and First Broken Layer attribution.
+- Added cognitive-path diagnosis across intent, route, plan, action, retrieval, context, generation, and postprocessing.
+- Added the Minimal Next Probe Planner, Controlled Cognitive Replay, and Gold Context capability-isolation probes.
+- Added OpenInference / OTLP trace adaptation, including observable Agent-to-Tool plan evidence.
+- Added provider metadata and one shared OpenAI-compatible transport, with OrcaRouter as the first provider preset.
+- Added Provider Check for bounded connectivity, authentication, model-catalog, and optional model-invocation evidence.
+
+#### Safety and Evidence Boundaries
+
+- Dify integration uses published APIs and remains read-only by default; it does not install Dify, start containers, import DSLs automatically, create knowledge bases, or upload documents.
+- API keys and optional chat response content are never retained or rendered in Provider Check results.
+- Public endpoints require explicit `--allow-public`; LAN/private endpoints require explicit `--allow-non-local`; URL credentials are rejected.
+- A model catalog entry does not prove invocation access, and HTTP 401 authentication failures remain distinct from HTTP 403 model-access denials.
+- Unsupported probes and missing evidence remain `UNKNOWN`, including TTFT, pricing, and total compute cost.
+- Partner metadata cannot influence diagnosis, scores, comparisons, rankings, or recommendations.
+- Live checks and performance reports are bounded smoke tests, not formal benchmarks.
 
 ## v0.6.0
 

@@ -8,17 +8,10 @@ from inferdoctor.core.http import (
     HTTPCheckError,
     describe_http_error,
     get_url,
-    join_url,
     response_raw_data,
 )
 from inferdoctor.core.models import CheckResult, Status
-
-
-def _models_url(base_url: str) -> str:
-    normalized = base_url.rstrip("/")
-    if urlsplit(normalized).path.rstrip("/").endswith("/v1"):
-        return join_url(normalized, "models")
-    return join_url(normalized, "v1/models")
+from inferdoctor.core.openai_compatible import models_url as _models_url
 
 
 def _suggested_v1_base(base_url: str) -> str:
