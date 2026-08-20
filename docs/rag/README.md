@@ -22,6 +22,7 @@ InferDoctor does not start with one opaque LLM-generated score. Deterministic ev
 ```bash
 inferdoctor rag case init --output rag-cases.jsonl
 inferdoctor rag case validate rag-cases.jsonl
+inferdoctor rag capture dify-knowledge --base-url http://127.0.0.1:5001/v1 --dataset-id DATASET_ID --query "fictional return policy" --output trace.json
 inferdoctor rag trace validate trace.json
 inferdoctor rag diagnose --case case.json --trace trace.json --format markdown --output diagnosis.md
 inferdoctor rag compare --case case.json --before before-trace.json --after after-trace.json
@@ -33,3 +34,12 @@ The schemas are framework-neutral. Adapters can be written for Dify, LangChain, 
 ## Privacy
 
 A trace can omit source text, prompt text, and answer text while preserving IDs, hashes, ranks, scores, lengths, timings, and status. Public examples must use fictional data only.
+
+
+## Dify retrieval capture
+
+`rag capture dify-knowledge` reuses InferDoctor's existing Dify Knowledge API client and converts the returned retrieval records into `inferdoctor.rag.trace.v1`.
+
+By default, query text and retrieved chunk text are not retained. Their hashes and safe structural metadata are exported instead. Use `--include-content` only for synthetic or explicitly approved diagnostic content.
+
+The Dify Knowledge API adapter is intentionally retrieval-only. It does not claim that retrieved chunks were selected into the final application context, and it does not infer prompt, generation, tool, or post-processing behavior that the Knowledge API did not expose.

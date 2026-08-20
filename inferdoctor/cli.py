@@ -82,6 +82,9 @@ from inferdoctor.core.rag import (
     validate_case_file,
     validate_trace_file,
 )
+from inferdoctor.core.rag_dify import (
+    capture_dify_knowledge_trace,
+)
 from inferdoctor.core.quickstart import (
     QUICKSTART_GOALS,
     QUICKSTART_HARDWARE,
@@ -539,6 +542,70 @@ def _parser() -> argparse.ArgumentParser:
     rag_case_validate.add_argument("path")
     rag_case_validate.add_argument("--format", choices=("console", "json", "markdown"), default="console")
     rag_case_validate.add_argument("--output")
+    rag_capture = rag_subparsers.add_parser(
+        "capture",
+        help="Capture framework evidence into a standard RAG Trace",
+    )
+    rag_capture_subparsers = rag_capture.add_subparsers(
+        dest="rag_capture_command",
+        required=True,
+    )
+    rag_capture_dify = rag_capture_subparsers.add_parser(
+        "dify-knowledge",
+        help="Capture Dify Knowledge API retrieval evidence",
+    )
+    rag_capture_dify.add_argument(
+        "--base-url",
+        help="Dify knowledge API base URL",
+    )
+    rag_capture_dify.add_argument(
+        "--knowledge-key-env",
+        default="DIFY_KNOWLEDGE_API_KEY",
+        help="Environment variable containing the Dify knowledge API key",
+    )
+    rag_capture_dify.add_argument(
+        "--dataset-id",
+        help="Dify dataset ID; defaults to DIFY_DATASET_ID",
+    )
+    rag_capture_dify.add_argument(
+        "--query",
+        required=True,
+        help="Query to send to the Dify Knowledge API",
+    )
+    rag_capture_dify.add_argument(
+        "--top-k",
+        type=int,
+        default=3,
+        help="Requested Dify retrieval top_k",
+    )
+    rag_capture_dify.add_argument(
+        "--case-id",
+        help="Optional RAG Case ID to associate with this trace",
+    )
+    rag_capture_dify.add_argument(
+        "--include-content",
+        action="store_true",
+        help="Explicitly retain query and retrieved chunk text in the trace",
+    )
+    rag_capture_dify.add_argument(
+        "--timeout",
+        type=_positive_float,
+        default=30.0,
+    )
+    rag_capture_dify.add_argument(
+        "--allow-non-local",
+        action="store_true",
+    )
+    rag_capture_dify.add_argument(
+        "--allow-public",
+        action="store_true",
+    )
+    rag_capture_dify.add_argument(
+        "--output",
+        required=True,
+        help="Write the captured RAG Trace JSON to this path",
+    )
+
     rag_trace = rag_subparsers.add_parser("trace", help="Validate RAG Trace files")
     rag_trace_subparsers = rag_trace.add_subparsers(dest="rag_trace_command", required=True)
     rag_trace_validate = rag_trace_subparsers.add_parser("validate", help="Validate a RAG Trace JSON file")
@@ -1176,6 +1243,46 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     result = validate_case_file(args.path)
                     _emit_output(render_rag_result(result, args.format), args.output)
                     return 1 if result.get("status") == "FAIL" else 0
+            if (
+                args.rag_command == "capture"
+                and args.rag_capture_command == "dify-knowledge"
+            ):
+                config = load_dify_config(
+                    knowledge_base_url=args.base_url,
+                    knowledge_key_env=args.knowledge_key_env,
+                    dataset_id=args.dataset_id,
+                    timeout=args.timeout,
+                    allow_non_local=args.allow_non_local,
+                    allow_public=args.allow_public,
+                )
+
+                result = capture_dify_knowledge_trace(
+                    config,
+                    query=args.query,
+                    top_k=args.top_k,
+                    include_content=args.include_content,
+                    case_id=args.case_id,
+                )
+
+                Path(args.output).write_text(
+                    json.dumps(
+                        result,
+                        indent=2,
+                        sort_keys=True,
+                        ensure_ascii=False,
+                    )
+                    + "\n",
+                    encoding="utf-8",
+                )
+
+                print(
+                    "Wrote Dify RAG Trace: {0}".format(
+                        args.output
+                    )
+                )
+
+                return 0
+
             if args.rag_command == "trace" and args.rag_trace_command == "validate":
                 result = validate_trace_file(args.path)
                 _emit_output(render_rag_result(result, args.format), args.output)

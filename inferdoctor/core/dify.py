@@ -278,9 +278,42 @@ class DifyAPIClient:
             result["answer_retained"] = False
         return result
 
-    def retrieve_chunks(self, dataset_id: str, query: str) -> Dict[str, Any]:
-        body = {"query": query, "retrieval_model": {"search_method": "semantic_search", "top_k": 3}}
-        return self.request_json("POST", "/datasets/{0}/retrieve".format(urllib.parse.quote(dataset_id, safe="")), body=body)
+    def retrieve_chunks(
+        self,
+        dataset_id: str,
+        query: str,
+        *,
+        top_k: int = 3,
+    ) -> Dict[str, Any]:
+        if (
+            isinstance(top_k, bool)
+            or not isinstance(top_k, int)
+            or top_k <= 0
+        ):
+            raise DifyError(
+                "top_k must be a positive integer"
+            )
+
+        body = {
+            "query": query,
+            "retrieval_model": {
+                "search_method": (
+                    "semantic_search"
+                ),
+                "top_k": top_k,
+            },
+        }
+
+        return self.request_json(
+            "POST",
+            "/datasets/{0}/retrieve".format(
+                urllib.parse.quote(
+                    dataset_id,
+                    safe="",
+                )
+            ),
+            body=body,
+        )
 
 
 def _http_error_message(exc: urllib.error.HTTPError) -> str:
