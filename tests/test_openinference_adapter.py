@@ -352,3 +352,338 @@ def test_otlp_json_shape_is_supported():
         ]
         == "crm_lookup"
     )
+
+
+
+def _agent_span(
+    span_id="agent-1",
+):
+    return {
+        "name": "agent",
+        "context": {
+            "trace_id": "trace-plan",
+            "span_id": span_id,
+        },
+        "status_code": "OK",
+        "attributes": {
+            "openinference.span.kind": (
+                "AGENT"
+            ),
+        },
+    }
+
+
+def _tool_span(
+    span_id,
+    tool_name,
+    *,
+    parent_id,
+    start_time=None,
+):
+    item = {
+        "name": "tool",
+        "context": {
+            "trace_id": "trace-plan",
+            "span_id": span_id,
+        },
+        "parent_id": parent_id,
+        "status_code": "OK",
+        "attributes": {
+            "openinference.span.kind": (
+                "TOOL"
+            ),
+            "tool.name": tool_name,
+        },
+    }
+
+    if start_time is not None:
+        item[
+            "start_time"
+        ] = start_time
+
+    return item
+
+
+def test_agent_tool_children_feed_existing_plan_semantics():
+    payload = [
+        _agent_span(),
+        _tool_span(
+            "tool-2",
+            "send_email",
+            parent_id="agent-1",
+            start_time=(
+                "2026-08-20T01:00:02+00:00"
+            ),
+        ),
+        _tool_span(
+            "tool-1",
+            "crm_lookup",
+            parent_id="agent-1",
+            start_time=(
+                "2026-08-20T01:00:01+00:00"
+            ),
+        ),
+    ]
+
+    trace = (
+        project_openinference_trace(
+            payload
+        )
+    )
+
+    case = {
+        "schema_version": (
+            COGNITIVE_CASE_SCHEMA_VERSION
+        ),
+        "case_id": (
+            "openinference-plan"
+        ),
+        "expected_plan": [
+            "crm_lookup",
+            "send_email",
+        ],
+    }
+
+    result = evaluate_cognitive_case(
+        case,
+        trace,
+    )
+
+    assert (
+        result["semantic_status"]
+        == "PASS"
+    )
+
+    plan = [
+        item
+        for item
+        in trace["observations"]
+        if (
+            item.get("source")
+            == "openinference_agent_tool_sequence"
+        )
+    ]
+
+    assert [
+        item["planned_tool"]
+        for item in plan
+    ] == [
+        "crm_lookup",
+        "send_email",
+    ]
+
+    assert (
+        trace["adapter"][
+            "derived_plan_observation_count"
+        ]
+        == 2
+    )
+
+
+def test_nested_tool_descendant_can_feed_agent_plan():
+    agent = _agent_span()
+
+    chain = {
+        "name": "internal-chain",
+        "context": {
+            "trace_id": "trace-plan",
+            "span_id": "chain-1",
+        },
+        "parent_id": "agent-1",
+        "status_code": "OK",
+        "attributes": {
+            "openinference.span.kind": (
+                "CHAIN"
+            ),
+        },
+    }
+
+    tool = _tool_span(
+        "tool-1",
+        "crm_lookup",
+        parent_id="chain-1",
+    )
+
+    trace = (
+        project_openinference_trace([
+            agent,
+            chain,
+            tool,
+        ])
+    )
+
+    case = {
+        "schema_version": (
+            COGNITIVE_CASE_SCHEMA_VERSION
+        ),
+        "case_id": (
+            "nested-plan"
+        ),
+        "expected_plan": [
+            "crm_lookup"
+        ],
+    }
+
+    result = evaluate_cognitive_case(
+        case,
+        trace,
+    )
+
+    assert (
+        result["semantic_status"]
+        == "PASS"
+    )
+
+
+def test_multi_tool_plan_without_timestamps_remains_unknown():
+    trace = (
+        project_openinference_trace([
+            _agent_span(),
+            _tool_span(
+                "tool-1",
+                "crm_lookup",
+                parent_id="agent-1",
+            ),
+            _tool_span(
+                "tool-2",
+                "send_email",
+                parent_id="agent-1",
+            ),
+        ])
+    )
+
+    case = {
+        "schema_version": (
+            COGNITIVE_CASE_SCHEMA_VERSION
+        ),
+        "case_id": (
+            "ambiguous-plan"
+        ),
+        "expected_plan": [
+            "crm_lookup",
+            "send_email",
+        ],
+    }
+
+    result = evaluate_cognitive_case(
+        case,
+        trace,
+    )
+
+    assert (
+        result["semantic_status"]
+        == "INCOMPLETE"
+    )
+
+    assert (
+        result["first_broken_layer"]
+        is None
+    )
+
+    assert (
+        trace["adapter"][
+            "derived_plan_observation_count"
+        ]
+        == 0
+    )
+
+
+def test_tool_outside_agent_is_action_not_plan():
+    trace = (
+        project_openinference_trace([
+            _tool_span(
+                "tool-1",
+                "crm_lookup",
+                parent_id="root-chain",
+            )
+        ])
+    )
+
+    plan = [
+        item
+        for item
+        in trace["observations"]
+        if (
+            item.get("source")
+            == "openinference_agent_tool_sequence"
+        )
+    ]
+
+    action = [
+        item
+        for item
+        in trace["observations"]
+        if item["layer"]
+        == "action"
+    ]
+
+    assert plan == []
+
+    assert len(action) == 1
+
+    assert (
+        action[0]["tool_name"]
+        == "crm_lookup"
+    )
+
+
+def test_agent_plan_can_be_first_broken_with_openinference():
+    trace = (
+        project_openinference_trace([
+            _agent_span(),
+            _tool_span(
+                "tool-1",
+                "web_search",
+                parent_id="agent-1",
+            ),
+        ])
+    )
+
+    case = {
+        "schema_version": (
+            COGNITIVE_CASE_SCHEMA_VERSION
+        ),
+        "case_id": (
+            "openinference-plan-fail"
+        ),
+        "expected_plan": [
+            "crm_lookup"
+        ],
+        "expected_tool": (
+            "crm_lookup"
+        ),
+    }
+
+    result = evaluate_cognitive_case(
+        case,
+        trace,
+    )
+
+    assert (
+        result["first_broken_layer"]
+        == "plan"
+    )
+
+    plan = next(
+        item
+        for item in result["layers"]
+        if item["layer"]
+        == "plan"
+    )
+
+    action = next(
+        item
+        for item in result["layers"]
+        if item["layer"]
+        == "action"
+    )
+
+    assert (
+        plan["semantic_role"]
+        == "FIRST_BROKEN"
+    )
+
+    assert (
+        action["semantic_role"]
+        == "DOWNSTREAM_OBSERVATION"
+    )

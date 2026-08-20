@@ -178,3 +178,20 @@ Supported input forms include:
 Raw `input.value` and `output.value` are not retained. InferDoctor stores hashes and lengths only.
 
 Kinds without a safe Cognitive mapping, including Prompt, Guardrail, Evaluator, Chain, and Embedding, remain explicitly unmapped rather than being guessed.
+
+
+### OpenInference Agent plan evidence
+
+OpenInference represents an Agent as a span that can encompass Tool and LLM spans.
+
+InferDoctor uses the observable span hierarchy to derive a privacy-safe tool plan:
+
+`AGENT -> TOOL crm_lookup -> TOOL send_email`
+
+This can be evaluated by the existing Cognitive Case field:
+
+`"expected_plan": ["crm_lookup", "send_email"]`
+
+For multiple tool calls, InferDoctor requires distinct captured span start timestamps before claiming an order. If ordering evidence is absent or ambiguous, Plan remains UNKNOWN.
+
+This is observable action planning only. It does not reconstruct or retain hidden chain-of-thought.

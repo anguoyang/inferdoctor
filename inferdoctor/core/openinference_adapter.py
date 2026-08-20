@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
@@ -314,6 +315,358 @@ def _parent_span_id(
     return None
 
 
+def _span_kind(
+    span: Dict[str, Any],
+) -> Optional[str]:
+    attributes = _attributes(
+        span
+    )
+
+    value = attributes.get(
+        "openinference.span.kind"
+    )
+
+    if (
+        isinstance(value, str)
+        and value
+    ):
+        return value.upper()
+
+    return None
+
+
+def _span_start_sort_key(
+    span: Dict[str, Any],
+) -> Optional[float]:
+    for key in (
+        "startTimeUnixNano",
+        "start_time_unix_nano",
+    ):
+        value = span.get(key)
+
+        if (
+            isinstance(
+                value,
+                (int, float),
+            )
+            and not isinstance(
+                value,
+                bool,
+            )
+        ):
+            return float(value)
+
+        if (
+            isinstance(value, str)
+            and value.isdigit()
+        ):
+            return float(value)
+
+    value = span.get(
+        "start_time"
+    )
+
+    if not isinstance(
+        value,
+        str,
+    ) or not value:
+        return None
+
+    try:
+        normalized = (
+            value[:-1] + "+00:00"
+            if value.endswith("Z")
+            else value
+        )
+
+        return datetime.fromisoformat(
+            normalized
+        ).timestamp()
+
+    except ValueError:
+        return None
+
+
+def _nearest_agent_ancestor(
+    span: Dict[str, Any],
+    spans_by_id: Dict[
+        str,
+        Dict[str, Any],
+    ],
+    kinds_by_id: Dict[
+        str,
+        Optional[str],
+    ],
+) -> Optional[str]:
+    parent = _parent_span_id(
+        span
+    )
+
+    visited = set()
+
+    while parent:
+        if parent in visited:
+            return None
+
+        visited.add(parent)
+
+        if (
+            kinds_by_id.get(
+                parent
+            )
+            == "AGENT"
+        ):
+            return parent
+
+        ancestor = spans_by_id.get(
+            parent
+        )
+
+        if not isinstance(
+            ancestor,
+            dict,
+        ):
+            return None
+
+        parent = _parent_span_id(
+            ancestor
+        )
+
+    return None
+
+
+def _derived_agent_plan_observations(
+    spans: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    spans_by_id: Dict[
+        str,
+        Dict[str, Any],
+    ] = {}
+
+    kinds_by_id: Dict[
+        str,
+        Optional[str],
+    ] = {}
+
+    for span in spans:
+        span_id = _context_value(
+            span,
+            "span_id",
+        )
+
+        if not span_id:
+            continue
+
+        spans_by_id[
+            span_id
+        ] = span
+
+        kinds_by_id[
+            span_id
+        ] = _span_kind(
+            span
+        )
+
+    grouped: Dict[
+        str,
+        List[
+            tuple[
+                int,
+                Dict[str, Any],
+                str,
+            ]
+        ],
+    ] = {}
+
+    for index, span in enumerate(
+        spans
+    ):
+        if (
+            _span_kind(span)
+            != "TOOL"
+        ):
+            continue
+
+        attributes = _attributes(
+            span
+        )
+
+        tool_name = attributes.get(
+            "tool.name"
+        )
+
+        if not (
+            isinstance(
+                tool_name,
+                str,
+            )
+            and tool_name
+        ):
+            continue
+
+        agent_span_id = (
+            _nearest_agent_ancestor(
+                span,
+                spans_by_id,
+                kinds_by_id,
+            )
+        )
+
+        if not agent_span_id:
+            continue
+
+        grouped.setdefault(
+            agent_span_id,
+            [],
+        ).append(
+            (
+                index,
+                span,
+                tool_name,
+            )
+        )
+
+    observations: List[
+        Dict[str, Any]
+    ] = []
+
+    for (
+        agent_span_id,
+        tool_items,
+    ) in grouped.items():
+        if len(tool_items) == 1:
+            ordered = tool_items
+            order_source = (
+                "single_tool"
+            )
+
+        else:
+            timed = [
+                (
+                    _span_start_sort_key(
+                        span
+                    ),
+                    original_index,
+                    span,
+                    tool_name,
+                )
+                for (
+                    original_index,
+                    span,
+                    tool_name,
+                )
+                in tool_items
+            ]
+
+            if any(
+                item[0] is None
+                for item in timed
+            ):
+                continue
+
+            timestamps = [
+                item[0]
+                for item in timed
+            ]
+
+            if (
+                len(set(timestamps))
+                != len(timestamps)
+            ):
+                continue
+
+            timed.sort(
+                key=lambda item: (
+                    item[0],
+                    item[1],
+                )
+            )
+
+            ordered = [
+                (
+                    original_index,
+                    span,
+                    tool_name,
+                )
+                for (
+                    _,
+                    original_index,
+                    span,
+                    tool_name,
+                )
+                in timed
+            ]
+
+            order_source = (
+                "span_start_time"
+            )
+
+        for position, (
+            _,
+            tool_span,
+            tool_name,
+        ) in enumerate(
+            ordered,
+            start=1,
+        ):
+            observation: Dict[
+                str,
+                Any,
+            ] = {
+                "layer": "plan",
+                "source": (
+                    "openinference_agent_tool_sequence"
+                ),
+                "span_kind": (
+                    "AGENT_TOOL_PLAN"
+                ),
+                "status": "observed",
+                "semantic_correctness": (
+                    "unknown"
+                ),
+                "agent_span_id": (
+                    agent_span_id
+                ),
+                "planned_tool": (
+                    tool_name
+                ),
+                "position": position,
+                "order_source": (
+                    order_source
+                ),
+            }
+
+            tool_span_id = (
+                _context_value(
+                    tool_span,
+                    "span_id",
+                )
+            )
+
+            if tool_span_id:
+                observation[
+                    "tool_span_id"
+                ] = tool_span_id
+
+            trace_id = (
+                _context_value(
+                    tool_span,
+                    "trace_id",
+                )
+            )
+
+            if trace_id:
+                observation[
+                    "trace_id"
+                ] = trace_id
+
+            observations.append(
+                observation
+            )
+
+    return observations
+
+
 def _execution_status(
     span: Dict[str, Any],
 ) -> str:
@@ -616,6 +969,16 @@ def project_openinference_trace(
                     trace_id
                 )
 
+    derived_plan_observations = (
+        _derived_agent_plan_observations(
+            spans
+        )
+    )
+
+    observations.extend(
+        derived_plan_observations
+    )
+
     return {
         "schema_version": (
             COGNITIVE_TRACE_SCHEMA_VERSION
@@ -646,8 +1009,16 @@ def project_openinference_trace(
             "input_span_count": len(
                 spans
             ),
-            "mapped_span_count": len(
-                observations
+            "mapped_span_count": (
+                len(observations)
+                - len(
+                    derived_plan_observations
+                )
+            ),
+            "derived_plan_observation_count": (
+                len(
+                    derived_plan_observations
+                )
             ),
         },
         "limitations": [
@@ -665,6 +1036,14 @@ def project_openinference_trace(
                 "Raw input.value and output.value "
                 "are represented by hashes and "
                 "lengths only."
+            ),
+            (
+                "Agent plan evidence is derived only "
+                "from observable TOOL descendants of "
+                "an AGENT span. Multi-tool ordering "
+                "requires distinct captured start "
+                "timestamps; ambiguous ordering "
+                "remains unevaluated."
             ),
         ],
     }
