@@ -289,3 +289,22 @@ def test_provider_check_console_renders_unknown_explicitly():
     assert "Status: UNKNOWN" in rendered
     assert "TTFT: UNKNOWN" in rendered
     assert "Pricing: UNKNOWN" in rendered
+
+
+
+def test_provider_check_malformed_key_fails_safely_without_secret():
+    bad_key = "prefix\nvery-secret-value"
+
+    result = run_provider_check(
+        get_provider_preset("orcarouter"),
+        api_key=bad_key,
+        allow_public=True,
+    )
+
+    serialized = json.dumps(result)
+
+    assert result["status"] == "FAIL"
+    assert result["request_sent"] is True
+    assert "very-secret-value" not in serialized
+    assert bad_key not in serialized
+    assert "invalid whitespace" in serialized

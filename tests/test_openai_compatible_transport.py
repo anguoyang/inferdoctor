@@ -129,3 +129,37 @@ def test_network_error_uses_transport_error_without_key(monkeypatch):
         )
 
     assert "do-not-leak" not in str(exc.value)
+
+
+
+def test_invalid_api_key_is_rejected_before_request_without_leaking_secret(
+    monkeypatch,
+):
+    called = False
+
+    def fake_urlopen(*_args, **_kwargs):
+        nonlocal called
+        called = True
+        raise AssertionError("network must not be reached")
+
+    monkeypatch.setattr(
+        openai_compatible.urllib.request,
+        "urlopen",
+        fake_urlopen,
+    )
+
+    bad_key = "prefix\nvery-secret-value"
+
+    with pytest.raises(
+        OpenAICompatibleTransportError,
+        match="invalid whitespace",
+    ) as exc:
+        list_models(
+            "https://provider.example/v1",
+            timeout=2.0,
+            api_key=bad_key,
+        )
+
+    assert called is False
+    assert "very-secret-value" not in str(exc.value)
+    assert bad_key not in str(exc.value)

@@ -71,6 +71,30 @@ def extract_chat_text(data: Any) -> str:
     return first.get("text") if isinstance(first.get("text"), str) else ""
 
 
+def _validated_api_key(
+    api_key: Optional[str],
+) -> Optional[str]:
+    if api_key is None or api_key == "":
+        return None
+
+    if not isinstance(api_key, str):
+        raise OpenAICompatibleTransportError(
+            "API key must be a string"
+        )
+
+    if any(
+        character.isspace()
+        or ord(character) < 32
+        or ord(character) == 127
+        for character in api_key
+    ):
+        raise OpenAICompatibleTransportError(
+            "API key contains invalid whitespace or control characters"
+        )
+
+    return api_key
+
+
 def _headers(api_key: Optional[str], *, has_body: bool) -> Dict[str, str]:
     headers = {
         "Accept": "application/json",
@@ -78,8 +102,14 @@ def _headers(api_key: Optional[str], *, has_body: bool) -> Dict[str, str]:
     }
     if has_body:
         headers["Content-Type"] = "application/json"
-    if api_key:
-        headers["Authorization"] = "Bearer {0}".format(api_key)
+
+    validated_key = _validated_api_key(api_key)
+
+    if validated_key:
+        headers["Authorization"] = "Bearer {0}".format(
+            validated_key
+        )
+
     return headers
 
 
@@ -117,6 +147,10 @@ def _request_json(
     except urllib.error.HTTPError as exc:
         status = int(exc.code)
         data = _read_bounded(exc)
+    except ValueError:
+        raise OpenAICompatibleTransportError(
+            "OpenAI-compatible request rejected invalid request metadata"
+        ) from None
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
         message = " ".join(str(exc).split())[:240] or "request failed"
         if api_key:
