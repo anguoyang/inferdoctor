@@ -30,6 +30,12 @@ from inferdoctor.core.dify import (
     run_dify_smoke,
     validate_dify_kit,
 )
+from inferdoctor.core.cognitive import (
+    render_cognitive_analysis,
+)
+from inferdoctor.core.dify_cognitive import (
+    capture_dify_cognitive_trace,
+)
 from inferdoctor.core.dify_reliability import (
     render_reliability_report,
     run_dify_connectivity_check,
@@ -531,6 +537,51 @@ def _parser() -> argparse.ArgumentParser:
     dify_knowledge_check.add_argument("--allow-public", action="store_true")
     dify_knowledge_check.add_argument("--format", choices=("console", "json", "markdown"), default="console")
     dify_knowledge_check.add_argument("--output", help="Write output to this file")
+
+    dify_trace = dify_subparsers.add_parser(
+        "trace",
+        help="Capture Dify orchestration evidence for cognitive-path diagnosis",
+    )
+    dify_trace_subparsers = dify_trace.add_subparsers(
+        dest="dify_trace_command",
+        required=True,
+    )
+    dify_trace_capture = dify_trace_subparsers.add_parser(
+        "capture",
+        help="Capture a safe Dify cognitive execution trace",
+    )
+    dify_trace_capture.add_argument(
+        "--base-url",
+        help="Dify app API base URL",
+    )
+    dify_trace_capture.add_argument(
+        "--app-key-env",
+        default="DIFY_APP_API_KEY",
+        help="Environment variable containing the Dify app API key",
+    )
+    dify_trace_capture.add_argument(
+        "--query",
+        required=True,
+        help="Query to execute through the Dify app",
+    )
+    dify_trace_capture.add_argument(
+        "--timeout",
+        type=_positive_float,
+        default=30.0,
+    )
+    dify_trace_capture.add_argument(
+        "--allow-non-local",
+        action="store_true",
+    )
+    dify_trace_capture.add_argument(
+        "--allow-public",
+        action="store_true",
+    )
+    dify_trace_capture.add_argument(
+        "--output",
+        required=True,
+        help="Write cognitive trace JSON to this path",
+    )
 
     rag = subparsers.add_parser("rag", help="Diagnose RAG answer quality with deterministic layered evidence")
     rag_subparsers = rag.add_subparsers(dest="rag_command", required=True)
@@ -1349,6 +1400,57 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 result = run_dify_knowledge_check(config, query=args.query, show_content=args.show_content)
                 _emit_output(render_dify_knowledge(result, args.format), args.output)
                 return 1 if result.get("status") == "FAIL" else 0
+            if (
+                args.dify_command == "trace"
+                and args.dify_trace_command == "capture"
+            ):
+                config = load_dify_config(
+                    base_url=args.base_url,
+                    app_key_env=args.app_key_env,
+                    timeout=args.timeout,
+                    allow_non_local=args.allow_non_local,
+                    allow_public=args.allow_public,
+                )
+
+                result = capture_dify_cognitive_trace(
+                    config,
+                    query=args.query,
+                )
+
+                Path(args.output).write_text(
+                    json.dumps(
+                        result,
+                        indent=2,
+                        sort_keys=True,
+                        ensure_ascii=False,
+                    )
+                    + "\n",
+                    encoding="utf-8",
+                )
+
+                print(
+                    "Wrote Dify cognitive trace: {0}".format(
+                        args.output
+                    )
+                )
+
+                print(
+                    render_cognitive_analysis(
+                        result["analysis"]
+                    )
+                )
+
+                return (
+                    1
+                    if result[
+                        "analysis"
+                    ][
+                        "execution_status"
+                    ]
+                    == "FAIL"
+                    else 0
+                )
+
             if args.dify_command == "selfhost":
                 if args.dify_selfhost_command == "preflight":
                     result = run_dify_selfhost_preflight(compose_file=args.compose_file, project_directory=args.project_directory, project_name=args.project_name)
