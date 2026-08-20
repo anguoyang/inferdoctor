@@ -1714,6 +1714,87 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
             if (
                 args.cognitive_command
+                == "probe"
+                and args.cognitive_probe_command
+                == "gold-context"
+            ):
+                cognitive_analysis = (
+                    evaluate_cognitive_case(
+                        load_cognitive_case(
+                            args.cognitive_case
+                        ),
+                        load_cognitive_trace(
+                            args.cognitive_trace
+                        ),
+                    )
+                )
+
+                rag_case = load_case(
+                    args.rag_case
+                )
+
+                context_text = Path(
+                    args.context_file
+                ).read_text(
+                    encoding="utf-8"
+                )
+
+                api_key = None
+
+                if args.api_key_env:
+                    import os
+
+                    api_key = os.environ.get(
+                        args.api_key_env
+                    )
+
+                result = (
+                    run_cognitive_gold_context_probe(
+                        cognitive_analysis,
+                        rag_case,
+                        context_text=context_text,
+                        endpoint=args.endpoint,
+                        model=args.model,
+                        timeout=args.timeout,
+                        dry_run=args.dry_run,
+                        allow_non_local=args.allow_non_local,
+                        allow_public=args.allow_public,
+                        api_key=api_key,
+                        retain_answer=args.retain_answer,
+                    )
+                )
+
+                if args.format == "json":
+                    rendered = json.dumps(
+                        result,
+                        indent=2,
+                        sort_keys=True,
+                        ensure_ascii=False,
+                    )
+                else:
+                    rendered = (
+                        render_cognitive_gold_context(
+                            result
+                        )
+                    )
+
+                _emit_output(
+                    rendered,
+                    args.output,
+                )
+
+                return (
+                    1
+                    if result["verdict"]
+                    in {
+                        "GOLD_CONTEXT_FAIL",
+                        "PROBE_FAILED",
+                    }
+                    else 0
+                )
+
+            if (
+                args.cognitive_command
                 == "replay"
                 and args.cognitive_replay_command
                 == "compare"
