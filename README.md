@@ -8,7 +8,7 @@
 
 **Evidence-driven diagnosis for local and hosted AI applications.**
 
-InferDoctor normalizes evidence from local stacks, Dify applications, RAG and agent traces, and explicitly approved OpenAI-compatible providers. It identifies the first broken layer, proposes controlled next probes, and keeps missing evidence visible instead of guessing.
+InferDoctor normalizes evidence from local stacks, Dify applications, RAG and agent traces, and explicitly approved OpenAI-compatible providers. **OrcaRouter is the first built-in hosted-provider preset, implemented through the same provider-neutral diagnostic layer.** InferDoctor identifies the first broken layer, proposes controlled next probes, and keeps missing evidence visible instead of guessing.
 
 The original local AI workflow remains available: inspect stack health, choose a reasonable setup, generate and validate a starter app, measure bounded responsiveness, save a baseline, and compare after a change.
 
@@ -17,7 +17,7 @@ Use it to:
 - find why Ollama, vLLM, SGLang, Xinference, Dify, CUDA, NVIDIA, Docker, or local endpoints are not working;
 - attribute RAG and agent failures across intent, routing, planning, tools, retrieval, context, generation, and postprocessing;
 - plan minimal evidence-gathering probes and run controlled cognitive or Gold Context replays;
-- check explicitly approved hosted providers with conservative authentication and model-access evidence;
+- diagnose hosted-provider connectivity, authentication, model-catalog visibility, and invocation access, with OrcaRouter as the first built-in preset;
 - estimate what your machine can realistically run with clear heuristic caveats;
 - choose a practical local AI stack for a goal such as customer service, document Q&A, or a local API;
 - generate, validate, and smoke-test starter projects without contacting a model endpoint;

@@ -2,7 +2,17 @@
 
 ## Unreleased
 
-### v0.7.0 Release Candidate
+## v0.7.1
+
+### Documentation and Metadata Hotfix
+
+- Made OrcaRouter visible in the PyPI summary and README first screen as InferDoctor's first built-in hosted-provider preset.
+- Added current RAG, agent, OpenInference, OpenTelemetry, OpenAI-compatible, and OrcaRouter package keywords.
+- Clarified that OrcaRouter uses the provider-neutral diagnostic layer and does not affect diagnostic independence or recommendation logic.
+- No diagnostic, provider-transport, security, or runtime behavior changed.
+
+## v0.7.0
+
 
 #### Highlights
 

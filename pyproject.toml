@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "inferdoctor"
-version = "0.7.0"
-description = "Evidence-driven diagnosis for local and hosted AI applications."
+version = "0.7.1"
+description = "Evidence-driven diagnosis for local and hosted AI applications, with provider checks including OrcaRouter."
 readme = "README.md"
 requires-python = ">=3.9"
 license = "Apache-2.0"
@@ -19,6 +19,12 @@ keywords = [
   "diagnostics",
   "dify",
   "inference",
+  "orcarouter",
+  "rag",
+  "agent",
+  "openinference",
+  "opentelemetry",
+  "openai-compatible",
   "nvidia",
   "ollama",
   "sglang",
