@@ -159,3 +159,22 @@ or:
 InferDoctor compares the ordered observed tool sequence with the expected sequence.
 
 This is deliberately narrower than claiming access to the model's hidden reasoning. It diagnoses observable action planning, not private chain-of-thought.
+
+
+## OpenInference import
+
+InferDoctor can import OpenInference spans instead of requiring framework-specific trace instrumentation.
+
+OpenInference already defines standard span kinds such as Agent, Tool, Retriever, Reranker, and LLM. InferDoctor projects only conservative mappings into the Cognitive Trace.
+
+`inferdoctor cognitive import openinference --input openinference.json --output cognitive.json`
+
+Supported input forms include:
+
+- a JSON list of spans
+- `{ "spans": [...] }`
+- OTLP JSON using `resourceSpans -> scopeSpans -> spans`
+
+Raw `input.value` and `output.value` are not retained. InferDoctor stores hashes and lengths only.
+
+Kinds without a safe Cognitive mapping, including Prompt, Guardrail, Evaluator, Chain, and Embedding, remain explicitly unmapped rather than being guessed.

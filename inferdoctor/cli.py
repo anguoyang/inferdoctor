@@ -55,6 +55,9 @@ from inferdoctor.core.cognitive_gold import (
     render_cognitive_gold_context,
     run_cognitive_gold_context_probe,
 )
+from inferdoctor.core.openinference_adapter import (
+    load_openinference_trace,
+)
 from inferdoctor.core.dify_reliability import (
     render_reliability_report,
     run_dify_connectivity_check,
@@ -742,6 +745,28 @@ def _parser() -> argparse.ArgumentParser:
     )
     cognitive_gold_context.add_argument(
         "--output",
+    )
+
+    cognitive_import = cognitive_subparsers.add_parser(
+        "import",
+        help="Import standard tracing evidence into a Cognitive Trace",
+    )
+    cognitive_import_subparsers = cognitive_import.add_subparsers(
+        dest="cognitive_import_command",
+        required=True,
+    )
+
+    cognitive_import_openinference = cognitive_import_subparsers.add_parser(
+        "openinference",
+        help="Import OpenInference or OTLP JSON spans",
+    )
+    cognitive_import_openinference.add_argument(
+        "--input",
+        required=True,
+    )
+    cognitive_import_openinference.add_argument(
+        "--output",
+        required=True,
     )
 
     cognitive_replay = cognitive_subparsers.add_parser(
@@ -1630,6 +1655,49 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
                 return 0
 
+
+            if (
+                args.cognitive_command
+                == "import"
+                and args.cognitive_import_command
+                == "openinference"
+            ):
+                result = (
+                    load_openinference_trace(
+                        args.input
+                    )
+                )
+
+                Path(
+                    args.output
+                ).write_text(
+                    json.dumps(
+                        result,
+                        indent=2,
+                        sort_keys=True,
+                        ensure_ascii=False,
+                    )
+                    + "\n",
+                    encoding="utf-8",
+                )
+
+                print(
+                    "Wrote Cognitive Trace: {0}".format(
+                        args.output
+                    )
+                )
+
+                print(
+                    "mapped spans: {0}".format(
+                        result[
+                            "adapter"
+                        ][
+                            "mapped_span_count"
+                        ]
+                    )
+                )
+
+                return 0
 
             if (
                 args.cognitive_command
