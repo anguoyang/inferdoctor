@@ -304,15 +304,112 @@ def test_duplicate_trace_case_id_is_inconclusive(tmp_path):
     )
 
 
-def test_incompatible_traces_are_inconclusive(tmp_path):
+def test_pipeline_metadata_change_with_unchanged_quality_is_pass(tmp_path):
     after = _trace()
     after["pipeline"] = {"name": "fictional-candidate-rag", "version": "2"}
+    result, _paths = _run_dataset(tmp_path, [_case()], [_trace()], [after])
+
+    assert result["status"] == "PASS"
+    assert rag_gate_exit_code(result) == 0
+    assert result["cases"][0]["verdict"] == "unchanged"
+    assert result["cases"][0]["compatibility_warnings"] == []
+    assert result["cases"][0]["implementation_changes"] == ["pipeline differs"]
+
+
+def test_model_and_provider_change_with_unchanged_quality_is_pass(tmp_path):
+    after = _trace()
+    after["generation"]["model"] = "candidate-fixture-model"
+    after["generation"]["provider"] = "candidate-fixture-provider"
+    result, _paths = _run_dataset(tmp_path, [_case()], [_trace()], [after])
+
+    assert result["status"] == "PASS"
+    assert rag_gate_exit_code(result) == 0
+    assert result["cases"][0]["verdict"] == "unchanged"
+    assert result["cases"][0]["compatibility_warnings"] == []
+    assert result["cases"][0]["implementation_changes"] == [
+        "model differs",
+        "provider differs",
+    ]
+
+
+def test_model_change_does_not_hide_deterministic_regression(tmp_path):
+    after = _trace(answer=False)
+    after["generation"]["model"] = "candidate-fixture-model"
+    result, _paths = _run_dataset(tmp_path, [_case()], [_trace()], [after])
+
+    assert result["status"] == "BLOCKED"
+    assert rag_gate_exit_code(result) == 1
+    assert result["cases"][0]["verdict"] == "regressed"
+    assert result["cases"][0]["implementation_changes"] == ["model differs"]
+
+
+def test_question_workload_change_is_inconclusive(tmp_path):
+    after = _trace()
+    after["input"]["original_question"] = "Which fictional expense code applies?"
     result, _paths = _run_dataset(tmp_path, [_case()], [_trace()], [after])
 
     assert result["status"] == "INCONCLUSIVE"
     assert rag_gate_exit_code(result) == 2
     assert result["cases"][0]["verdict"] == "incompatible"
-    assert "pipeline differs" in result["cases"][0]["compatibility_warnings"]
+    assert "questions differ" in result["cases"][0]["compatibility_warnings"]
+
+
+def test_retrieval_latency_jitter_does_not_block_quality_gate(tmp_path):
+    after = _trace()
+    after["retrieval"]["latency_ms"] = 11
+    result, _paths = _run_dataset(tmp_path, [_case()], [_trace()], [after])
+
+    assert result["status"] == "PASS"
+    assert rag_gate_exit_code(result) == 0
+    assert result["cases"][0]["verdict"] == "unchanged"
+    assert result["cases"][0]["observed_latency_deltas_ms"] == {
+        "retrieval": 1.0,
+        "generation": 0.0,
+    }
+
+
+def test_generation_latency_jitter_does_not_block_quality_gate(tmp_path):
+    after = _trace()
+    after["generation"]["total_ms"] = 107
+    result, _paths = _run_dataset(tmp_path, [_case()], [_trace()], [after])
+
+    assert result["status"] == "PASS"
+    assert rag_gate_exit_code(result) == 0
+    assert result["cases"][0]["verdict"] == "unchanged"
+    assert result["cases"][0]["observed_latency_deltas_ms"] == {
+        "retrieval": 0.0,
+        "generation": 7.0,
+    }
+
+
+def test_quality_regression_blocks_despite_latency_improvement(tmp_path):
+    after = _trace(answer=False)
+    after["retrieval"]["latency_ms"] = 5
+    after["generation"]["total_ms"] = 50
+    result, _paths = _run_dataset(tmp_path, [_case()], [_trace()], [after])
+
+    assert result["status"] == "BLOCKED"
+    assert rag_gate_exit_code(result) == 1
+    assert result["cases"][0]["verdict"] == "regressed"
+    assert result["cases"][0]["observed_latency_deltas_ms"] == {
+        "retrieval": -5.0,
+        "generation": -50.0,
+    }
+
+
+def test_latency_cannot_rescue_redacted_quality_evidence(tmp_path):
+    after = _trace(redacted=True)
+    after["retrieval"]["latency_ms"] = 1
+    after["generation"]["total_ms"] = 1
+    result, _paths = _run_dataset(tmp_path, [_case()], [_trace()], [after])
+
+    assert result["status"] == "INCONCLUSIVE"
+    assert rag_gate_exit_code(result) == 2
+    assert result["cases"][0]["verdict"] == "inconclusive"
+    assert result["cases"][0]["observed_latency_deltas_ms"] == {
+        "retrieval": -9.0,
+        "generation": -99.0,
+    }
 
 
 def test_unmatched_trace_case_id_is_reported(tmp_path):

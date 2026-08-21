@@ -8,6 +8,7 @@ from typing import Any, DefaultDict, Dict, List, Mapping, Optional, Sequence, Tu
 from inferdoctor import __version__
 from inferdoctor.core.rag import (
     RagError,
+    RAG_COMPARISON_POLICY_QUALITY,
     compare_rag,
     diagnose_rag,
     load_cases,
@@ -329,6 +330,11 @@ def _inconclusive_case(
         "verdict": "inconclusive",
         "compatibility_warnings": [],
         "comparison_limitations": list(dict.fromkeys(reasons)),
+        "implementation_changes": [],
+        "observed_latency_deltas_ms": {
+            "retrieval": None,
+            "generation": None,
+        },
         "before_first_broken_layer": None,
         "after_first_broken_layer": None,
         "first_broken_layer_changed": False,
@@ -342,7 +348,12 @@ def _matched_case(
     before: Dict[str, Any],
     after: Dict[str, Any],
 ) -> Dict[str, Any]:
-    comparison = compare_rag(case, before, after)
+    comparison = compare_rag(
+        case,
+        before,
+        after,
+        comparison_policy=RAG_COMPARISON_POLICY_QUALITY,
+    )
     before_diagnosis = diagnose_rag(case, before)
     after_diagnosis = diagnose_rag(case, after)
     before_first = _established_first_layer(before_diagnosis)
@@ -356,6 +367,17 @@ def _matched_case(
         "comparison_limitations": list(
             comparison.get("comparison_limitations") or []
         ),
+        "implementation_changes": list(
+            comparison.get("implementation_changes") or []
+        ),
+        "observed_latency_deltas_ms": {
+            "retrieval": comparison.get("changes", {}).get(
+                "retrieval_latency_ms_delta"
+            ),
+            "generation": comparison.get("changes", {}).get(
+                "generation_total_ms_delta"
+            ),
+        },
         "before_first_broken_layer": before_first,
         "after_first_broken_layer": after_first,
         "first_broken_layer_changed": before_first != after_first,

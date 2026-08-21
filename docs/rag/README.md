@@ -46,6 +46,8 @@ inferdoctor rag gate \
 
 Trace filenames do not need to match. The gate matches Cases and Traces by `case_id`, rejects ambiguous duplicates, and treats missing, invalid, redacted, incompatible, or non-evaluable evidence as inconclusive rather than passing it silently.
 
+Model, provider, and pipeline metadata changes are recorded as candidate implementation changes rather than treated as Gate incompatibilities. Observed latency deltas remain evidence, but without an explicit performance policy they do not decide this quality verdict; workload identity changes still make the comparison inconclusive.
+
 Exit codes are suitable for CI:
 
 - `0`: all evaluated Cases are improved or unchanged.
