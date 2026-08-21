@@ -2145,17 +2145,29 @@ def _apply_evidence_sufficiency(
         attribution = {}
     first_layer = attribution.get("first_broken_layer")
     criteria = _answer_evaluation_criteria(case)
+    first_diagnosis = next(
+        (
+            item
+            for item in result.get("diagnoses", [])
+            if isinstance(item, dict)
+            and item.get("attribution_role") == "first_broken_layer"
+        ),
+        {},
+    )
+    blocking_unknown = [
+        str(message)
+        for message in first_diagnosis.get("what_is_not_known", [])
+        if str(message).strip()
+    ]
+    supports_first_layer = bool(
+        first_layer
+        and criteria["total"]
+        and first_diagnosis.get("evidence_strength")
+        in {"observed", "strongly_indicated"}
+        and not blocking_unknown
+    )
 
-    if first_layer and criteria["total"]:
-        first_diagnosis = next(
-            (
-                item
-                for item in result.get("diagnoses", [])
-                if isinstance(item, dict)
-                and item.get("attribution_role") == "first_broken_layer"
-            ),
-            {},
-        )
+    if supports_first_layer:
         for message in first_diagnosis.get("what_is_known", []):
             remember(known, str(message))
         for message in first_diagnosis.get("evidence", []):
@@ -2336,6 +2348,26 @@ def _apply_evidence_sufficiency(
                 "criteria_violated": "The symptom is established; isolate pipeline layers next.",
             },
         )
+    elif first_diagnosis.get("category") == "conversation_memory_contamination":
+        remember(
+            unknown,
+            "Whether conversation history caused the observed answer-quality symptom.",
+        )
+        probe = _structured_probe(
+            "CONTROLLED_REPLAY",
+            "conversation",
+            ["the same Case replayed without conversation history"],
+            "Replay the same question as a clean single-turn trace without conversation history.",
+            "The current contamination signal is possible, so a controlled replay is required before treating conversation as causal.",
+            {
+                "clean_replay_succeeds": (
+                    "Conversation contamination becomes supported for this Case."
+                ),
+                "clean_replay_still_fails": (
+                    "Conversation is not isolated as the cause; investigate the next causal boundary."
+                ),
+            },
+        )
     elif required_source_ids and not retrieval_known:
         remember(
             unknown,
@@ -2495,7 +2527,11 @@ def _apply_evidence_sufficiency(
             "Available deterministic evidence is sufficient for the current "
             "conclusion; no broken layer is established."
         )
-    elif probe["probe_type"] in {"GOLD_CONTEXT", "HUMAN_REVIEW"}:
+    elif probe["probe_type"] in {
+        "CONTROLLED_REPLAY",
+        "GOLD_CONTEXT",
+        "HUMAN_REVIEW",
+    }:
         sufficiency_status = "PARTIAL"
         rationale = (
             "Useful observations are established, but one controlled probe or "
@@ -3114,6 +3150,10 @@ def _render_console(result: Dict[str, Any]) -> str:
             for message in unknown:
                 lines.append("- {0}".format(message))
 
+    first_layer_supported = not (
+        isinstance(sufficiency, dict)
+        and sufficiency.get("supports_first_broken_layer") is False
+    )
     attribution = result.get(
         "attribution"
     )
@@ -3131,7 +3171,7 @@ def _render_console(result: Dict[str, Any]) -> str:
 
         lines.append(
             "First broken layer: {0}".format(
-                first_layer
+                (first_layer if first_layer_supported else None)
                 or "not established"
             )
         )
@@ -3157,6 +3197,7 @@ def _render_console(result: Dict[str, Any]) -> str:
                     "  <-- FIRST BROKEN"
                     if role
                     == "FIRST_BROKEN"
+                    and first_layer_supported
                     else ""
                 )
 
@@ -3176,6 +3217,15 @@ def _render_console(result: Dict[str, Any]) -> str:
                 ):
                     role_note = (
                         " (established upstream)"
+                    )
+
+                elif (
+                    role
+                    == "FIRST_BROKEN"
+                    and not first_layer_supported
+                ):
+                    role_note = (
+                        " (provisional observation)"
                     )
 
                 lines.append(

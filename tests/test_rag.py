@@ -1213,3 +1213,87 @@ def test_console_report_shows_sufficiency_known_unknown_and_probe():
     assert "Unknown:" in rendered
     assert "Minimal Next Probe:" in rendered
     assert "Target layer: context" in rendered
+
+
+def test_context_truncation_unknown_is_not_supported_first_broken_layer():
+    item = trace(answer=False, truncated=True)
+    item["retrieval"]["candidates"][0].pop("text")
+    item["context_selection"]["context_text"] = "Synthetic policy heading."
+    item["context_selection"]["context_length_chars"] = 25
+
+    result = diagnose_rag(case(), item)
+    truncation = next(
+        diagnosis
+        for diagnosis in result["diagnoses"]
+        if diagnosis["category"] == "context_truncation"
+    )
+
+    assert result["attribution"]["first_broken_layer"] == "context"
+    assert truncation["evidence_strength"] == "observed"
+    assert truncation["confidence"] == "medium"
+    assert truncation["what_is_not_known"]
+    assert result["evidence_sufficiency"]["status"] == "INSUFFICIENT"
+    assert result["evidence_sufficiency"]["supports_first_broken_layer"] is False
+    assert result["minimal_next_probe"]["probe_type"] == "CAPTURE_EVIDENCE"
+    assert result["minimal_next_probe"]["target_layer"] == "context_selection"
+
+
+def test_possible_conversation_contamination_selects_controlled_replay():
+    item = trace(answer=False)
+    item["conversation"] = {
+        "history_included": True,
+        "possible_contamination_signals": ["synthetic prior-turn overlap"],
+    }
+
+    result = diagnose_rag(case(), item)
+    contamination = next(
+        diagnosis
+        for diagnosis in result["diagnoses"]
+        if diagnosis["category"] == "conversation_memory_contamination"
+    )
+
+    assert result["attribution"]["first_broken_layer"] == "conversation"
+    assert contamination["evidence_strength"] == "possible"
+    assert result["evidence_sufficiency"]["status"] == "PARTIAL"
+    assert result["evidence_sufficiency"]["supports_first_broken_layer"] is False
+    assert result["minimal_next_probe"]["probe_type"] == "CONTROLLED_REPLAY"
+    assert result["minimal_next_probe"]["target_layer"] == "conversation"
+    assert set(result["minimal_next_probe"]["expected_disambiguation"]) == {
+        "clean_replay_succeeds",
+        "clean_replay_still_fails",
+    }
+
+
+def test_renderer_does_not_establish_unsupported_provisional_layer():
+    item = trace(answer=False)
+    item["conversation"] = {
+        "history_included": True,
+        "possible_contamination_signals": ["synthetic prior-turn overlap"],
+    }
+
+    rendered = render_rag_result(diagnose_rag(case(), item), "console")
+
+    assert "First broken layer: not established" in rendered
+    assert "First broken layer: conversation" not in rendered
+    assert "<-- FIRST BROKEN" not in rendered
+    assert "provisional observation" in rendered
+
+
+def test_possible_contamination_without_evaluation_defines_evaluation_first():
+    item_case = case()
+    item_case["required_facts"] = []
+    item_case["forbidden_claims"] = []
+    item = trace(answer=False)
+    item["conversation"] = {
+        "history_included": True,
+        "possible_contamination_signals": ["synthetic prior-turn overlap"],
+    }
+
+    result = diagnose_rag(item_case, item)
+    rendered = render_rag_result(result, "console")
+
+    assert result["attribution"]["first_broken_layer"] == "conversation"
+    assert result["evidence_sufficiency"]["supports_first_broken_layer"] is False
+    assert result["minimal_next_probe"]["probe_type"] == "DEFINE_EVALUATION"
+    assert "First broken layer: not established" in rendered
+    assert "First broken layer: conversation" not in rendered
