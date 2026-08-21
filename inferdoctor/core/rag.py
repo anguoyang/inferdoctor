@@ -23,6 +23,8 @@ RAG_TRACE_SCHEMA_VERSION = "inferdoctor.rag.trace.v1"
 RAG_DIAGNOSIS_SCHEMA_VERSION = "inferdoctor.rag.diagnosis.v1"
 RAG_COMPARISON_SCHEMA_VERSION = "inferdoctor.rag.comparison.v1"
 RAG_GOLD_PROBE_SCHEMA_VERSION = "inferdoctor.rag.gold_context_probe.v1"
+RAG_COMPARISON_POLICY_STRICT = "strict"
+RAG_COMPARISON_POLICY_QUALITY = "quality"
 
 MATCH_MODES = {"all_terms", "any_term", "exact_phrase", "human_review"}
 MAX_FIELD_CHARS = 20000
@@ -2559,9 +2561,18 @@ def compare_rag(
     case: Dict[str, Any],
     before: Dict[str, Any],
     after: Dict[str, Any],
+    *,
+    comparison_policy: str = RAG_COMPARISON_POLICY_STRICT,
 ) -> Dict[str, Any]:
+    if comparison_policy not in {
+        RAG_COMPARISON_POLICY_STRICT,
+        RAG_COMPARISON_POLICY_QUALITY,
+    }:
+        raise RagError("unsupported RAG comparison policy")
+
     compatibility: List[str] = []
     limitations: List[str] = []
+    implementation_changes: List[str] = []
 
     if (
         before.get("case_id")
@@ -2596,9 +2607,11 @@ def compare_rag(
         before.get("pipeline")
         != after.get("pipeline")
     ):
-        compatibility.append(
-            "pipeline differs"
-        )
+        implementation_changes.append("pipeline differs")
+        if comparison_policy == RAG_COMPARISON_POLICY_STRICT:
+            compatibility.append(
+                "pipeline differs"
+            )
 
     before_model = _section_dict(
         before,
@@ -2611,8 +2624,28 @@ def compare_rag(
     ).get("model")
 
     if before_model != after_model:
-        compatibility.append(
-            "model differs"
+        implementation_changes.append("model differs")
+        if comparison_policy == RAG_COMPARISON_POLICY_STRICT:
+            compatibility.append(
+                "model differs"
+            )
+
+    before_provider = _section_dict(
+        before,
+        "generation",
+    ).get("provider")
+    after_provider = _section_dict(
+        after,
+        "generation",
+    ).get("provider")
+
+    if (
+        before_provider
+        and after_provider
+        and before_provider != after_provider
+    ):
+        implementation_changes.append(
+            "provider differs"
         )
 
     before_diag = diagnose_rag(
@@ -2817,14 +2850,20 @@ def compare_rag(
                 value == 0
                 for value in quality_changes
             )
-            and all(
-                value == 0
-                for value in performance_changes
-                if value is not None
-            )
-            and all(
-                value is not None
-                for value in performance_changes
+            and (
+                comparison_policy
+                == RAG_COMPARISON_POLICY_QUALITY
+                or (
+                    all(
+                        value == 0
+                        for value in performance_changes
+                        if value is not None
+                    )
+                    and all(
+                        value is not None
+                        for value in performance_changes
+                    )
+                )
             )
         ):
             verdict = "unchanged"
@@ -2853,12 +2892,14 @@ def compare_rag(
         "inferdoctor_version": __version__,
         "case_id": case.get("case_id"),
         "verdict": verdict,
+        "comparison_policy": comparison_policy,
         "compatibility_warnings": (
             compatibility
         ),
         "comparison_limitations": (
             list(dict.fromkeys(limitations))
         ),
+        "implementation_changes": implementation_changes,
         "changes": changes,
         "before_status": (
             before_diag["status"]
@@ -3313,6 +3354,10 @@ def _render_console(result: Dict[str, Any]) -> str:
 
 def _render_markdown(result: Dict[str, Any]) -> str:
     return "# " + _render_console(result).replace("\n", "\n\n")
+
+
+def load_cases(path: str | Path) -> List[Dict[str, Any]]:
+    return _load_json_or_jsonl(path)
 
 
 def load_case(path: str | Path) -> Dict[str, Any]:

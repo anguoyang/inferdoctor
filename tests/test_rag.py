@@ -151,9 +151,12 @@ def test_compare_improved_and_incompatible():
     before = trace(retrieved=False, answer=False)
     after = trace(retrieved=True, selected=True, answer=True)
     assert compare_rag(case(), before, after)["verdict"] == "improved"
-    changed = dict(after)
-    changed["pipeline"] = {"name": "other"}
-    assert compare_rag(case(), before, changed)["verdict"] == "incompatible"
+    changed_pipeline = dict(after)
+    changed_pipeline["pipeline"] = {"name": "other"}
+    assert compare_rag(case(), before, changed_pipeline)["verdict"] == "incompatible"
+    changed_model = trace(retrieved=True, selected=True, answer=True)
+    changed_model["generation"]["model"] = "other-fixture-model"
+    assert compare_rag(case(), before, changed_model)["verdict"] == "incompatible"
 
 
 def test_gold_context_probe_dry_run():
@@ -582,6 +585,25 @@ def test_compare_missing_latency_does_not_become_zero():
         result["verdict"]
         == "inconclusive"
     )
+
+
+def test_compare_quality_policy_keeps_latency_evidence_without_using_it():
+    before = trace()
+    after = trace()
+    after["retrieval"]["latency_ms"] = 11
+
+    strict_result = compare_rag(case(), before, after)
+    quality_result = compare_rag(
+        case(),
+        before,
+        after,
+        comparison_policy="quality",
+    )
+
+    assert strict_result["verdict"] == "inconclusive"
+    assert quality_result["verdict"] == "unchanged"
+    assert strict_result["changes"]["retrieval_latency_ms_delta"] == 1.0
+    assert quality_result["changes"]["retrieval_latency_ms_delta"] == 1.0
 
 
 def test_compare_reports_first_broken_layer_change():
