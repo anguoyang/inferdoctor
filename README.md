@@ -153,17 +153,18 @@ Docs:
 
 ## Provider Foundation
 
-Provider presets are metadata layered over one shared OpenAI-compatible transport. Provider Check measures connectivity, authentication, and model-list evidence without turning InferDoctor into a router or provider SDK.
+Provider presets and custom targets are layered over one shared OpenAI-compatible transport. Provider Check measures bounded connectivity, authentication, and model evidence. Provider Compare executes the same existing RAG Case workload against OrcaRouter and a custom or local endpoint, then reports deterministic fact evidence, one observed latency sample, and the first failed observable layer.
 
 ```bash
 inferdoctor provider list
 inferdoctor provider show orcarouter
 inferdoctor provider check --provider orcarouter --allow-public
+inferdoctor provider compare --provider orcarouter --custom-endpoint http://127.0.0.1:8000/v1 --custom-model local-model --case case.json --allow-public --format json
 ```
 
-The default check sends only an authenticated `GET /models`. A real chat request requires explicit `--smoke`; response content is not retained. Missing evidence remains `UNKNOWN`, including unsupported `/models`, TTFT, pricing, and total compute cost. API keys are read from provider-specific environment variables and never reported. Partner metadata never affects diagnosis or recommendations.
+Custom localhost targets can run without a fake API key; authenticated custom targets name an optional key environment variable. Comparison is bounded evidence, not a benchmark or LLM-as-a-judge evaluation. Raw answers and API keys are not persisted. Unsupported evidence, TTFT, pricing, and total compute cost remain `UNKNOWN`. Partner metadata never affects diagnosis, comparison, ordering, First Broken Layer attribution, or recommendations.
 
-Docs: [Provider Foundation and Provider Check](https://github.com/anguoyang/inferdoctor/blob/main/docs/providers.md)
+Docs: [Provider Foundation, Provider Check, and Provider Compare](https://github.com/anguoyang/inferdoctor/blob/main/docs/providers.md)
 
 ## Language Support
 
