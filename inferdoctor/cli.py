@@ -128,6 +128,11 @@ from inferdoctor.core.rag import (
     validate_case_file,
     validate_trace_file,
 )
+from inferdoctor.core.rag_gate import (
+    rag_gate_exit_code,
+    render_rag_gate,
+    run_rag_gate,
+)
 from inferdoctor.core.rag_dify import (
     capture_dify_knowledge_trace,
 )
@@ -1039,6 +1044,12 @@ def _parser() -> argparse.ArgumentParser:
     rag_compare.add_argument("--after", required=True)
     rag_compare.add_argument("--format", choices=("console", "json", "markdown"), default="console")
     rag_compare.add_argument("--output")
+    rag_gate = rag_subparsers.add_parser("gate", help="Gate a RAG change across existing Cases and before/after Traces")
+    rag_gate.add_argument("--cases", required=True)
+    rag_gate.add_argument("--before", required=True)
+    rag_gate.add_argument("--after", required=True)
+    rag_gate.add_argument("--format", choices=("console", "json", "markdown"), default="console")
+    rag_gate.add_argument("--output")
     rag_probe = rag_subparsers.add_parser("probe", help="Run bounded RAG diagnostic probes")
     rag_probe_subparsers = rag_probe.add_subparsers(dest="rag_probe_command", required=True)
     rag_gold = rag_probe_subparsers.add_parser("gold-context", help="Probe whether a model can answer when explicit gold context is supplied")
@@ -2183,6 +2194,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 result = compare_rag(load_case(args.case), load_trace(args.before), load_trace(args.after))
                 _emit_output(render_rag_result(result, args.format), args.output)
                 return 1 if result.get("verdict") in {"regressed", "incompatible"} else 0
+            if args.rag_command == "gate":
+                result = run_rag_gate(
+                    args.cases,
+                    args.before,
+                    args.after,
+                )
+                _emit_output(render_rag_gate(result, args.format), args.output)
+                return rag_gate_exit_code(result)
             if args.rag_command == "probe" and args.rag_probe_command == "gold-context":
                 api_key = None
                 if args.api_key_env:

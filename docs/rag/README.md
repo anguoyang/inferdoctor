@@ -31,6 +31,42 @@ inferdoctor rag probe gold-context --case case.json --context-file gold-context.
 
 The schemas are framework-neutral. Adapters can be written for Dify, LangChain, LlamaIndex, RAGFlow, or custom applications as long as they emit the public trace schema.
 
+## Regression quality gate
+
+Know whether an AI change is safe to ship from the evidence you already collect.
+
+The gate reuses existing RAG Cases, Traces, `compare_rag()`, and causal diagnosis:
+
+```bash
+inferdoctor rag gate \
+  --cases cases.jsonl \
+  --before traces/before \
+  --after traces/after
+```
+
+Trace filenames do not need to match. The gate matches Cases and Traces by `case_id`, rejects ambiguous duplicates, and treats missing, invalid, redacted, incompatible, or non-evaluable evidence as inconclusive rather than passing it silently.
+
+Exit codes are suitable for CI:
+
+- `0`: all evaluated Cases are improved or unchanged.
+- `1`: at least one established regression blocks the change.
+- `2`: no regression was established, but input or comparison evidence is inconclusive.
+
+A minimal GitHub Actions step for a repository checkout is:
+
+```yaml
+- name: Install InferDoctor checkout
+  run: python -m pip install -e .
+- name: Gate RAG change
+  run: |
+    inferdoctor rag gate \
+      --cases cases.jsonl \
+      --before traces/before \
+      --after traces/after \
+      --format markdown \
+      --output rag-quality-gate.md
+```
+
 ## Privacy
 
 A trace can omit source text, prompt text, and answer text while preserving IDs, hashes, ranks, scores, lengths, timings, and status. Public examples must use fictional data only.

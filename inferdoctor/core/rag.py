@@ -3315,6 +3315,10 @@ def _render_markdown(result: Dict[str, Any]) -> str:
     return "# " + _render_console(result).replace("\n", "\n\n")
 
 
+def load_cases(path: str | Path) -> List[Dict[str, Any]]:
+    return _load_json_or_jsonl(path)
+
+
 def load_case(path: str | Path) -> Dict[str, Any]:
     return _single_json(path)
 
