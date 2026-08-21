@@ -232,6 +232,15 @@ def _safe_transport_summary(exc: OpenAICompatibleTransportError) -> str:
     return "The OpenAI-compatible request failed before a usable HTTP response was recorded."
 
 
+def _is_local_credential_error(exc: OpenAICompatibleTransportError) -> bool:
+    text = str(exc).lower()
+    return (
+        "invalid whitespace" in text
+        or "control characters" in text
+        or "api key must be a string" in text
+    )
+
+
 def _probe_models(
     result: Dict[str, Any],
     target: ProviderTarget,
@@ -252,9 +261,16 @@ def _probe_models(
         if result["request_sent"] is False:
             result["request_sent"] = None
         probe["request_sent"] = None
+        summary = _safe_transport_summary(exc)
+        if _is_local_credential_error(exc):
+            probe["status"] = "FAIL"
+            result["checks"]["authentication"] = _check(
+                "FAIL",
+                summary,
+            )
         result["checks"]["model_catalog"] = _check(
             "UNKNOWN",
-            _safe_transport_summary(exc),
+            summary,
         )
         return
 
@@ -376,7 +392,12 @@ def _invoke_workload(
         if result["request_sent"] is False:
             result["request_sent"] = None
         invocation["request_sent"] = None
-        result["checks"]["connectivity"] = _check(
+        layer = (
+            "authentication"
+            if _is_local_credential_error(exc)
+            else "connectivity"
+        )
+        result["checks"][layer] = _check(
             "FAIL",
             _safe_transport_summary(exc),
         )
@@ -702,7 +723,7 @@ def run_provider_compare(
 
 
 def _fmt_status(value: Any) -> str:
-    return str(value or "UNKNOWN")
+    return "UNKNOWN" if value is None else str(value)
 
 
 def render_provider_compare(result: Dict[str, Any], output_format: str = "console") -> str:

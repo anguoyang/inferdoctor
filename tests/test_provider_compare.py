@@ -359,6 +359,11 @@ def test_forbidden_claim_detection_is_derived_without_raw_answer(monkeypatch):
 def test_transport_failure_for_one_target_preserves_other_target_evidence(monkeypatch):
     _install_success_mocks(monkeypatch)
 
+    def models(endpoint, *, timeout, api_key=None):
+        if "orcarouter" in endpoint:
+            raise OpenAICompatibleTransportError("fixture connection refused")
+        return _response(data={"data": [{"id": "local-model"}]})
+
     def chat(endpoint, *, payload, timeout, api_key=None):
         if "orcarouter" in endpoint:
             raise OpenAICompatibleTransportError("fixture connection refused")
@@ -371,6 +376,7 @@ def test_transport_failure_for_one_target_preserves_other_target_evidence(monkey
             elapsed_ms=18,
         )
 
+    monkeypatch.setattr("inferdoctor.core.provider_compare.list_models", models)
     monkeypatch.setattr("inferdoctor.core.provider_compare.create_chat_completion", chat)
     result = run_provider_compare(
         _targets(),
@@ -380,30 +386,52 @@ def test_transport_failure_for_one_target_preserves_other_target_evidence(monkey
     )
 
     failed, successful = result["targets"]
+    assert failed["checks"]["connectivity"]["status"] == "FAIL"
+    assert failed["checks"]["authentication"]["status"] == "UNKNOWN"
     assert failed["first_broken_layer"] == "connectivity"
+    assert failed["request_sent"] is None
+    assert failed["models_probe"]["request_sent"] is None
+    assert failed["invocation"]["request_sent"] is None
     assert successful["status"] == "PASS"
     assert successful["quality"]["required_facts_matched"] == 2
     assert successful["metrics"]["observed_total_latency_ms"] == 18
 
 
-def test_transport_exception_keeps_request_sent_unknown_and_never_retains_secret(
+@pytest.mark.parametrize(
+    ("bad_key", "error_message", "secret_fragment", "safe_error_fragment"),
+    (
+        (
+            "prefix\nvery-secret-value",
+            "API key contains invalid whitespace or control characters",
+            "very-secret-value",
+            "invalid whitespace",
+        ),
+        (
+            {"token": "typed-secret-value"},
+            "API key must be a string",
+            "typed-secret-value",
+            "not a string",
+        ),
+    ),
+    ids=("whitespace", "non-string"),
+)
+def test_malformed_api_key_is_authentication_failure_without_secret_retention(
     monkeypatch,
+    bad_key,
+    error_message,
+    secret_fragment,
+    safe_error_fragment,
 ):
-    bad_key = "prefix\nvery-secret-value"
     _install_success_mocks(monkeypatch)
 
     def models(endpoint, *, timeout, api_key=None):
         if "orcarouter" in endpoint:
-            raise OpenAICompatibleTransportError(
-                "API key contains invalid whitespace or control characters"
-            )
+            raise OpenAICompatibleTransportError(error_message)
         return _response(data={"data": [{"id": "local-model"}]})
 
     def chat(endpoint, *, payload, timeout, api_key=None):
         if "orcarouter" in endpoint:
-            raise OpenAICompatibleTransportError(
-                "API key contains invalid whitespace or control characters"
-            )
+            raise OpenAICompatibleTransportError(error_message)
         return _response(
             data={
                 "choices": [
@@ -424,14 +452,20 @@ def test_transport_exception_keeps_request_sent_unknown_and_never_retains_secret
 
     assert failed["request_attempted"] is True
     assert failed["request_sent"] is None
+    assert failed["checks"]["connectivity"]["status"] == "UNKNOWN"
+    assert failed["checks"]["authentication"]["status"] == "FAIL"
     assert failed["metrics"]["sample_count"] == 0
+    assert failed["models_probe"]["status"] == "FAIL"
     assert failed["models_probe"]["request_sent"] is None
+    assert failed["models_probe"]["http_status"] is None
+    assert failed["checks"]["model_catalog"]["status"] == "UNKNOWN"
+    assert failed["invocation"]["status"] == "FAIL"
     assert failed["invocation"]["request_sent"] is None
-    assert failed["first_broken_layer"] == "connectivity"
+    assert failed["invocation"]["http_status"] is None
+    assert failed["first_broken_layer"] == "authentication"
     serialized = json.dumps(result)
-    assert bad_key not in serialized
-    assert "very-secret-value" not in serialized
-    assert "invalid whitespace" in serialized
+    assert secret_fragment not in serialized
+    assert safe_error_fragment in serialized
 
 
 def _diagnostic_projection(result):
@@ -582,3 +616,18 @@ def test_console_renderer_uses_unknown_not_inferred_ttft(monkeypatch):
     assert "TTFT" in rendered
     assert "UNKNOWN" in rendered
     assert "not a benchmark" in rendered
+
+
+def test_console_renderer_preserves_zero_forbidden_claim_matches(monkeypatch):
+    result, _calls = _run(monkeypatch)
+    assert all(
+        target["quality"]["forbidden_claims_matched"] == 0
+        for target in result["targets"]
+    )
+
+    rendered = render_provider_compare(result)
+    forbidden_line = next(
+        line for line in rendered.splitlines() if line.startswith("Forbidden claims")
+    )
+    assert forbidden_line.split() == ["Forbidden", "claims", "0", "0"]
+    assert "UNKNOWN" not in forbidden_line
