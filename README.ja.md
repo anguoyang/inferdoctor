@@ -2,25 +2,42 @@
 
 [English README](https://github.com/anguoyang/inferdoctor/blob/main/README.md)
 
-**InferDoctor は、ローカルまたはセルフホスト AI アプリの診断、セットアップ、性能 UX 改善を支援する軽量 CLI です。**
+## AIアプリがなぜ悪化したのか、推測で終わらせない。
 
-InferDoctor は、Ollama、vLLM、SGLang、Xinference、Dify、CUDA、NVIDIA ドライバ、llama.cpp server、LM Studio、Open WebUI などを安全に確認し、ローカル AI スタックがなぜ動かないのか、次に何を試すべきかを示します。
+### リグレッションをリリース前に止める。
 
-```bash
-inferdoctor
-```
+**InferDoctor は、AI アプリ向けの証拠ベースの診断・Quality Gate CLI です。**
 
-モデルを選ぶだけのツールではありません。InferDoctor は、診断、スタック計画、starter template、テンプレート検証、軽量な性能 smoke test、baseline 保存、最適化前後の比較、TTFT / streaming / RAG UX の改善アドバイスまでをつなげます。
+InferDoctor は、観測された証拠から **First Broken Layer（最初に壊れたレイヤー）** を特定し、根拠のない結論は **UNKNOWN** のまま扱います。さらに **Minimal Next Probe（次に行うべき最小の検証）** を提案し、Before / After の証拠を比較して、変更が評価対象の Case を本当に改善したかを確認します。
 
-## インストール
-
-PyPI からインストールできます。
+**RAG · Agent · ローカル / Hosted inference · CI Quality Gate**
 
 ```bash
 pip install inferdoctor
 ```
 
-開発版を GitHub から試す場合:
+![InferDoctor の診断・Quality Gate デモ](https://raw.githubusercontent.com/anguoyang/inferdoctor/main/docs/assets/inferdoctor-quality-gate.gif)
+
+`Evidence → First Broken Layer → Evidence Sufficiency → Minimal Next Probe → Fix Verification`
+
+> **Observability が「何が起きたか」を見せるなら、InferDoctor は観測された証拠から「どこから壊れたか」と「次に何を検証すべきか」を整理します。**
+
+### AI アプリの変更をリリース前に Gate する
+
+```bash
+inferdoctor rag gate \
+  --cases cases.jsonl \
+  --before traces/before \
+  --after traces/after
+```
+
+- `PASS`: 評価済み Case と利用可能な証拠から、確立された品質リグレッションは確認されていません。
+- `BLOCKED`: 品質リグレッションが確認され、InferDoctor が First Broken Layer など、原因を切り分けるための証拠を提示します。
+- `INCONCLUSIVE`: 変更をクリアするには証拠が不足しています。
+
+## 開発版のインストール
+
+GitHub から開発版を試す場合:
 
 ```bash
 python -m pip install "git+https://github.com/anguoyang/inferdoctor.git@dev"
