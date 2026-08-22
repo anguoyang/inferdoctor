@@ -1,41 +1,48 @@
 # InferDoctor
 
-[日本語クイックスタート](https://github.com/anguoyang/inferdoctor/blob/main/README.ja.md)
+[日本語](https://github.com/anguoyang/inferdoctor/blob/main/README.ja.md)
 
+[![PyPI](https://img.shields.io/pypi/v/inferdoctor.svg)](https://pypi.org/project/inferdoctor/)
 [![Tests](https://github.com/anguoyang/inferdoctor/actions/workflows/tests.yml/badge.svg)](https://github.com/anguoyang/inferdoctor/actions/workflows/tests.yml)
-[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.9%2B-blue.svg)](pyproject.toml)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
-**Evidence-driven diagnosis for local and hosted AI applications.**
+## Diagnose AI failures. Block regressions before they ship.
 
-InferDoctor normalizes evidence from local stacks, Dify applications, RAG and agent traces, and explicitly approved OpenAI-compatible providers. **OrcaRouter is the first built-in hosted-provider preset, implemented through the same provider-neutral diagnostic layer.** InferDoctor identifies the first broken layer, proposes controlled next probes, and keeps missing evidence visible instead of guessing.
+**InferDoctor is an evidence-driven diagnosis and regression-gating CLI for AI applications.**
 
-The original local AI workflow remains available: inspect stack health, choose a reasonable setup, generate and validate a starter app, measure bounded responsiveness, save a baseline, and compare after a change.
+It identifies the **First Broken Layer**, keeps unsupported conclusions **UNKNOWN**, recommends the **smallest useful next probe**, and helps verify whether a change actually fixed the problem.
 
-Use it to:
-
-- find why Ollama, vLLM, SGLang, Xinference, Dify, CUDA, NVIDIA, Docker, or local endpoints are not working;
-- attribute RAG and agent failures across intent, routing, planning, tools, retrieval, context, generation, and postprocessing;
-- plan minimal evidence-gathering probes and run controlled cognitive or Gold Context replays;
-- diagnose hosted-provider connectivity, authentication, model-catalog visibility, and invocation access, with OrcaRouter as the first built-in preset;
-- estimate what your machine can realistically run with clear heuristic caveats;
-- choose a practical local AI stack for a goal such as customer service, document Q&A, or a local API;
-- generate, validate, and smoke-test starter projects without contacting a model endpoint;
-- measure local, LAN, or private endpoint responsiveness with bounded smoke tests;
-- save sanitized performance baselines and compare before/after changes;
-- get practical TTFT, streaming, TPS, cold/warm, endpoint, and RAG UX optimization advice.
-
-It is lightweight and read-only by default. It does not install AI runtimes, download models, publish data, or modify system settings. Live endpoint checks require explicit scope approval, and model invocation occurs only when an optional smoke request is explicitly selected.
-
-## Install
-
-InferDoctor is available on PyPI:
+**RAG · Agents · Local & hosted inference · CI quality gates**
 
 ```bash
 pip install inferdoctor
 ```
 
-Alternative developer install from GitHub:
+![InferDoctor diagnosis and quality gate demo](https://raw.githubusercontent.com/anguoyang/inferdoctor/main/docs/assets/inferdoctor-quality-gate.gif)
+
+`Evidence → First Broken Layer → Evidence Sufficiency → Minimal Next Probe → Fix Verification`
+
+> **Observability tells you what happened. InferDoctor is built to help identify where the failure starts — and what to test next.**
+
+### Gate an AI change before release
+
+```bash
+inferdoctor rag gate \
+  --cases cases.jsonl \
+  --before traces/before \
+  --after traces/after
+```
+
+- `PASS`: No established quality regression was found in the evaluated Cases and available evidence.
+- `BLOCKED`: An established regression exists; InferDoctor surfaces causal diagnostic evidence such as the First Broken Layer.
+- `INCONCLUSIVE`: The available evidence is insufficient to clear the change.
+
+InferDoctor is lightweight and read-only by default. It does not install AI runtimes, download models, publish data, or modify system settings. Live endpoint checks require explicit scope approval, and model invocation occurs only when an optional smoke request is explicitly selected.
+
+## Developer installation
+
+Install the development version from GitHub:
 
 ```bash
 python -m pip install "git+https://github.com/anguoyang/inferdoctor.git@dev"
@@ -153,17 +160,18 @@ Docs:
 
 ## Provider Foundation
 
-Provider presets are metadata layered over one shared OpenAI-compatible transport. Provider Check measures connectivity, authentication, and model-list evidence without turning InferDoctor into a router or provider SDK.
+Provider presets and custom targets are layered over one shared OpenAI-compatible transport. Provider Check measures bounded connectivity, authentication, and model evidence. Provider Compare executes the same existing RAG Case workload against OrcaRouter and a custom or local endpoint, then reports deterministic fact evidence, one observed latency sample, and the first failed observable layer.
 
 ```bash
 inferdoctor provider list
 inferdoctor provider show orcarouter
 inferdoctor provider check --provider orcarouter --allow-public
+inferdoctor provider compare --provider orcarouter --custom-endpoint http://127.0.0.1:8000/v1 --custom-model local-model --case case.json --allow-public --format json
 ```
 
-The default check sends only an authenticated `GET /models`. A real chat request requires explicit `--smoke`; response content is not retained. Missing evidence remains `UNKNOWN`, including unsupported `/models`, TTFT, pricing, and total compute cost. API keys are read from provider-specific environment variables and never reported. Partner metadata never affects diagnosis or recommendations.
+Custom localhost targets can run without a fake API key; authenticated custom targets name an optional key environment variable. Comparison is bounded evidence, not a benchmark or LLM-as-a-judge evaluation. Raw answers and API keys are not persisted. Unsupported evidence, TTFT, pricing, and total compute cost remain `UNKNOWN`. Partner metadata never affects diagnosis, comparison, ordering, First Broken Layer attribution, or recommendations.
 
-Docs: [Provider Foundation and Provider Check](https://github.com/anguoyang/inferdoctor/blob/main/docs/providers.md)
+Docs: [Provider Foundation, Provider Check, and Provider Compare](https://github.com/anguoyang/inferdoctor/blob/main/docs/providers.md)
 
 ## Language Support
 

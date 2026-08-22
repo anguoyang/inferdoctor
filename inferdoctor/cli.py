@@ -87,11 +87,18 @@ from inferdoctor.core.optimize import advise_endpoint, advise_rag, render_optimi
 from inferdoctor.core.optimization_plan import build_optimization_plan, render_optimization_plan
 from inferdoctor.core.models import CheckResult, Status
 from inferdoctor.core.profile import render_profile_json, render_profile_markdown
+from inferdoctor.core.provider_compare import (
+    ProviderCompareError,
+    render_provider_compare,
+    run_provider_compare,
+)
 from inferdoctor.core.providers import (
     ProviderError,
+    custom_openai_compatible_target,
     get_provider_preset,
     list_provider_presets,
     provider_ids,
+    provider_target_from_preset,
     render_provider_check,
     render_provider_list,
     render_provider_show,
@@ -120,6 +127,11 @@ from inferdoctor.core.rag import (
     run_gold_context_probe,
     validate_case_file,
     validate_trace_file,
+)
+from inferdoctor.core.rag_gate import (
+    rag_gate_exit_code,
+    render_rag_gate,
+    run_rag_gate,
 )
 from inferdoctor.core.rag_dify import (
     capture_dify_knowledge_trace,
@@ -324,6 +336,66 @@ def _parser() -> argparse.ArgumentParser:
         default="console",
     )
     provider_check.add_argument("--output")
+    provider_compare = provider_subparsers.add_parser(
+        "compare",
+        help="Compare one provider preset with one custom OpenAI-compatible target",
+        description=(
+            "Execute one bounded same-workload request per target and report transparent "
+            "transport, deterministic quality, latency, and first-broken-layer evidence."
+        ),
+    )
+    provider_compare.add_argument(
+        "--provider",
+        required=True,
+        choices=provider_ids(),
+        help="Built-in provider preset target",
+    )
+    provider_compare.add_argument(
+        "--provider-model",
+        help="Override the provider preset's default model",
+    )
+    provider_compare.add_argument(
+        "--custom-endpoint",
+        required=True,
+        help="Custom or local OpenAI-compatible base URL",
+    )
+    provider_compare.add_argument(
+        "--custom-model",
+        required=True,
+        help="Model served by the custom OpenAI-compatible target",
+    )
+    provider_compare.add_argument(
+        "--custom-id",
+        default="custom",
+        help="Stable result id for the custom target",
+    )
+    provider_compare.add_argument(
+        "--custom-label",
+        default="Custom OpenAI-compatible",
+        help="Human-readable label for the custom target",
+    )
+    provider_compare.add_argument(
+        "--custom-api-key-env",
+        help="Optional environment variable containing the custom target API key",
+    )
+    provider_compare.add_argument(
+        "--case",
+        required=True,
+        help="Existing inferdoctor.rag.case.v1 JSON workload",
+    )
+    provider_compare.add_argument(
+        "--timeout",
+        type=_positive_float,
+        default=30.0,
+    )
+    provider_compare.add_argument("--allow-non-local", action="store_true")
+    provider_compare.add_argument("--allow-public", action="store_true")
+    provider_compare.add_argument(
+        "--format",
+        choices=("console", "json"),
+        default="console",
+    )
+    provider_compare.add_argument("--output")
 
     model = subparsers.add_parser(
         "model",
@@ -972,6 +1044,12 @@ def _parser() -> argparse.ArgumentParser:
     rag_compare.add_argument("--after", required=True)
     rag_compare.add_argument("--format", choices=("console", "json", "markdown"), default="console")
     rag_compare.add_argument("--output")
+    rag_gate = rag_subparsers.add_parser("gate", help="Gate a RAG change across existing Cases and before/after Traces")
+    rag_gate.add_argument("--cases", required=True)
+    rag_gate.add_argument("--before", required=True)
+    rag_gate.add_argument("--after", required=True)
+    rag_gate.add_argument("--format", choices=("console", "json", "markdown"), default="console")
+    rag_gate.add_argument("--output")
     rag_probe = rag_subparsers.add_parser("probe", help="Run bounded RAG diagnostic probes")
     rag_probe_subparsers = rag_probe.add_subparsers(dest="rag_probe_command", required=True)
     rag_gold = rag_probe_subparsers.add_parser("gold-context", help="Probe whether a model can answer when explicit gold context is supplied")
@@ -1453,6 +1531,40 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             if args.provider_command == "show":
                 print(render_provider_show(provider))
                 return 0
+            if args.provider_command == "compare":
+                preset_target = provider_target_from_preset(
+                    provider,
+                    model=args.provider_model,
+                )
+                custom_target = custom_openai_compatible_target(
+                    target_id=args.custom_id,
+                    display_name=args.custom_label,
+                    base_url=args.custom_endpoint,
+                    model=args.custom_model,
+                    api_key_env=args.custom_api_key_env,
+                )
+                result = run_provider_compare(
+                    [preset_target, custom_target],
+                    load_case(args.case),
+                    api_keys={
+                        preset_target.id: os.environ.get(
+                            preset_target.api_key_env or ""
+                        ),
+                        custom_target.id: (
+                            os.environ.get(custom_target.api_key_env)
+                            if custom_target.api_key_env
+                            else None
+                        ),
+                    },
+                    timeout=args.timeout,
+                    allow_non_local=args.allow_non_local,
+                    allow_public=args.allow_public,
+                )
+                _emit_output(
+                    render_provider_compare(result, args.format),
+                    args.output,
+                )
+                return 1 if result.get("status") == "FAIL" else 0
             result = run_provider_check(
                 provider,
                 api_key=os.environ.get(provider.api_key_env),
@@ -1467,7 +1579,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 args.output,
             )
             return 1 if result.get("status") == "FAIL" else 0
-        except ProviderError as exc:
+        except (
+            ProviderError,
+            ProviderCompareError,
+            RagError,
+            OSError,
+            json.JSONDecodeError,
+        ) as exc:
             print("inferdoctor: {0}".format(exc), file=sys.stderr)
             return 2
     if args.command == "experience":
@@ -2076,6 +2194,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 result = compare_rag(load_case(args.case), load_trace(args.before), load_trace(args.after))
                 _emit_output(render_rag_result(result, args.format), args.output)
                 return 1 if result.get("verdict") in {"regressed", "incompatible"} else 0
+            if args.rag_command == "gate":
+                result = run_rag_gate(
+                    args.cases,
+                    args.before,
+                    args.after,
+                )
+                _emit_output(render_rag_gate(result, args.format), args.output)
+                return rag_gate_exit_code(result)
             if args.rag_command == "probe" and args.rag_probe_command == "gold-context":
                 api_key = None
                 if args.api_key_env:

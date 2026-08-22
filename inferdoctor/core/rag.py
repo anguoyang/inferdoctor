@@ -23,6 +23,8 @@ RAG_TRACE_SCHEMA_VERSION = "inferdoctor.rag.trace.v1"
 RAG_DIAGNOSIS_SCHEMA_VERSION = "inferdoctor.rag.diagnosis.v1"
 RAG_COMPARISON_SCHEMA_VERSION = "inferdoctor.rag.comparison.v1"
 RAG_GOLD_PROBE_SCHEMA_VERSION = "inferdoctor.rag.gold_context_probe.v1"
+RAG_COMPARISON_POLICY_STRICT = "strict"
+RAG_COMPARISON_POLICY_QUALITY = "quality"
 
 MATCH_MODES = {"all_terms", "any_term", "exact_phrase", "human_review"}
 MAX_FIELD_CHARS = 20000
@@ -769,6 +771,50 @@ def _trace_evidence_summary(
             for key, value in checks.items()
             if not value
         ],
+    }
+
+
+def _answer_evaluation_criteria(
+    case: Dict[str, Any],
+) -> Dict[str, int]:
+    deterministic = 0
+    human_review = 0
+
+    for field in (
+        "required_facts",
+        "forbidden_claims",
+    ):
+        for criterion in case.get(field, []) or []:
+            if not isinstance(criterion, dict):
+                continue
+
+            mode = criterion.get("match_mode")
+
+            if mode == "human_review":
+                human_review += 1
+            elif (
+                mode in MATCH_MODES
+                and isinstance(
+                    criterion.get("match_terms"),
+                    list,
+                )
+                and bool(criterion.get("match_terms"))
+            ):
+                deterministic += 1
+
+    for field in (
+        "expected_answer",
+        "expected_behavior",
+    ):
+        value = case.get(field)
+
+        if isinstance(value, str) and value.strip():
+            human_review += 1
+
+    return {
+        "deterministic": deterministic,
+        "human_review": human_review,
+        "total": deterministic + human_review,
     }
 
 
@@ -1540,6 +1586,11 @@ def diagnose_rag(
             "At least one required-fact rule requires human review."
         )
 
+    if not _answer_evaluation_criteria(case)["total"]:
+        need(
+            "No usable deterministic or human-review answer-evaluation criterion was provided, so answer quality is not evaluable."
+        )
+
     if missing_evidence:
         add(
             "insufficient_evidence",
@@ -1606,7 +1657,7 @@ def diagnose_rag(
         "final_answer": final_state,
     }
 
-    return _apply_rag_attribution({
+    result = _apply_rag_attribution({
         "schema_version": (
             RAG_DIAGNOSIS_SCHEMA_VERSION
         ),
@@ -1642,6 +1693,12 @@ def diagnose_rag(
         },
         "forbidden_claims": forbidden,
     })
+
+    return _apply_evidence_sufficiency(
+        case,
+        trace,
+        result,
+    )
 
 
 RAG_LAYER_ORDER = {
@@ -2055,13 +2112,467 @@ def _apply_rag_attribution(
     return result
 
 
+def _structured_probe(
+    probe_type: str,
+    target_layer: str,
+    required_evidence: Sequence[str],
+    action: str,
+    reason: str,
+    expected_disambiguation: Dict[str, str],
+) -> Dict[str, Any]:
+    return {
+        "probe_type": probe_type,
+        "target_layer": target_layer,
+        "required_evidence": list(required_evidence),
+        "action": action,
+        "reason": reason,
+        "expected_disambiguation": dict(expected_disambiguation),
+    }
+
+
+def _apply_evidence_sufficiency(
+    case: Dict[str, Any],
+    trace: Dict[str, Any],
+    result: Dict[str, Any],
+) -> Dict[str, Any]:
+    known: List[str] = []
+    unknown: List[str] = []
+
+    def remember(target: List[str], message: str) -> None:
+        if message and message not in target:
+            target.append(message)
+
+    attribution = result.get("attribution")
+    if not isinstance(attribution, dict):
+        attribution = {}
+    first_layer = attribution.get("first_broken_layer")
+    criteria = _answer_evaluation_criteria(case)
+    first_diagnosis = next(
+        (
+            item
+            for item in result.get("diagnoses", [])
+            if isinstance(item, dict)
+            and item.get("attribution_role") == "first_broken_layer"
+        ),
+        {},
+    )
+    blocking_unknown = [
+        str(message)
+        for message in first_diagnosis.get("what_is_not_known", [])
+        if str(message).strip()
+    ]
+    supports_first_layer = bool(
+        first_layer
+        and criteria["total"]
+        and first_diagnosis.get("evidence_strength")
+        in {"observed", "strongly_indicated"}
+        and not blocking_unknown
+    )
+
+    if supports_first_layer:
+        for message in first_diagnosis.get("what_is_known", []):
+            remember(known, str(message))
+        for message in first_diagnosis.get("evidence", []):
+            remember(known, str(message))
+        for message in first_diagnosis.get("what_is_not_known", []):
+            remember(unknown, str(message))
+
+        result["evidence_sufficiency"] = {
+            "status": "SUFFICIENT",
+            "supports_first_broken_layer": True,
+            "known": known,
+            "unknown": unknown,
+            "rationale": (
+                "Observed evidence supports {0} as the First Broken Layer "
+                "at {1} confidence."
+            ).format(first_layer, attribution.get("confidence", "unknown")),
+        }
+        result["minimal_next_probe"] = None
+        return result
+
+    states = result.get("evidence_states", {})
+    coverage = result.get("required_fact_coverage", {})
+    context_coverage = coverage.get("context", {})
+    final_coverage = coverage.get("final_answer", {})
+    forbidden = result.get("forbidden_claims", {})
+
+    retrieval_known = states.get("retrieval_candidates") == "available"
+    selection_known = states.get("selected_chunk_ids") == "available"
+    context_state = str(states.get("context_text", "missing"))
+    raw_state = str(states.get("raw_answer", "missing"))
+    final_state = str(states.get("final_answer", "missing"))
+
+    required_source_ids = {
+        str(source.get("source_id"))
+        for source in case.get("expected_sources", []) or []
+        if isinstance(source, dict)
+        and source.get("required", True)
+        and source.get("source_id")
+    }
+    candidate_source_ids = _candidate_source_ids(trace)
+    retrieved_required = required_source_ids & candidate_source_ids
+
+    if retrieval_known:
+        candidates = _section_dict(trace, "retrieval").get("candidates", [])
+        remember(
+            known,
+            "Retrieval candidates were observed."
+            if candidates
+            else "The retrieval candidate list was observed and explicitly empty.",
+        )
+    if retrieved_required:
+        remember(
+            known,
+            "At least one required source was present in retrieval candidates.",
+        )
+    if selection_known:
+        remember(known, "Selected context chunk IDs were observed.")
+    if context_state == "available":
+        remember(known, "Final context content was observed.")
+        if int(context_coverage.get("deterministic", 0) or 0):
+            remember(
+                known,
+                "Final context omitted at least one deterministic required fact."
+                if int(context_coverage.get("deterministic_failed", 0) or 0)
+                else "Final context contained all deterministic required facts.",
+            )
+
+    grounding_signal = _section_dict(trace, "prompt").get(
+        "grounding_instruction_present"
+    )
+    if grounding_signal is True:
+        remember(
+            known,
+            "Prompt metadata reports that a grounding instruction was present.",
+        )
+    elif grounding_signal is False:
+        remember(
+            known,
+            "Prompt metadata reports that a grounding instruction was absent.",
+        )
+    if raw_state == "available":
+        remember(known, "Raw generation output was observed.")
+    if final_state == "available":
+        remember(known, "Final answer content was observed.")
+
+    required_failed = int(final_coverage.get("deterministic_failed", 0) or 0)
+    forbidden_failed = int(forbidden.get("matched", 0) or 0)
+    deterministic_available = (
+        int(final_coverage.get("deterministic", 0) or 0)
+        + int(forbidden.get("deterministic", 0) or 0)
+        > 0
+    )
+    answer_failed = (
+        final_state == "available"
+        and deterministic_available
+        and bool(required_failed or forbidden_failed)
+    )
+    answer_passed = (
+        final_state == "available"
+        and deterministic_available
+        and not answer_failed
+    )
+    human_review_required = bool(
+        criteria["human_review"]
+        or final_coverage.get("human_review_required")
+        or forbidden.get("human_review_required")
+    )
+    if answer_failed:
+        remember(
+            known,
+            "Final answer failed at least one deterministic Case criterion.",
+        )
+    elif answer_passed:
+        remember(
+            known,
+            "Final answer passed the available deterministic Case criteria.",
+        )
+
+    probe: Optional[Dict[str, Any]] = None
+
+    if not criteria["total"]:
+        remember(
+            unknown,
+            "Answer quality is not evaluable because the Case has no usable "
+            "deterministic or human-review criterion.",
+        )
+        probe = _structured_probe(
+            "DEFINE_EVALUATION",
+            "evaluation",
+            [
+                "case.required_facts, case.forbidden_claims, case.expected_answer, "
+                "or case.expected_behavior"
+            ],
+            "Define the smallest deterministic check or explicit human-review "
+            "criterion that makes the reported answer problem testable.",
+            "Causal diagnosis should not begin until the reported bad answer can "
+            "be evaluated.",
+            {
+                "criterion_satisfied": "Do not attribute a broken pipeline layer.",
+                "criterion_violated": "The symptom is established; isolate pipeline layers next.",
+            },
+        )
+    elif final_state != "available":
+        remember(
+            unknown,
+            "Final answer content is {0}, so answer quality cannot be evaluated.".format(
+                final_state
+            ),
+        )
+        probe = _structured_probe(
+            "CAPTURE_EVIDENCE",
+            "postprocessing",
+            [
+                "postprocessing.final_answer or in-memory deterministic evaluation results"
+            ],
+            "Capture or evaluate the final answer for the same case using a "
+            "privacy-approved content mode.",
+            "The answer-quality symptom must be observed before a pipeline layer "
+            "can be blamed.",
+            {
+                "criteria_pass": "The reported deterministic failure is not reproduced.",
+                "criteria_fail": "The symptom is established; isolate upstream evidence next.",
+            },
+        )
+    elif not deterministic_available:
+        remember(
+            unknown,
+            "Existing answer-quality criteria require human review; no deterministic verdict is available.",
+        )
+        probe = _structured_probe(
+            "HUMAN_REVIEW",
+            "evaluation",
+            ["case human-review criteria and the final answer"],
+            "Review the final answer against the Case's existing human-review criteria.",
+            "Human judgment is the smallest observation needed before causal attribution.",
+            {
+                "criteria_satisfied": "The reported answer problem is not established.",
+                "criteria_violated": "The symptom is established; isolate pipeline layers next.",
+            },
+        )
+    elif first_diagnosis.get("category") == "conversation_memory_contamination":
+        remember(
+            unknown,
+            "Whether conversation history caused the observed answer-quality symptom.",
+        )
+        probe = _structured_probe(
+            "CONTROLLED_REPLAY",
+            "conversation",
+            ["the same Case replayed without conversation history"],
+            "Replay the same question as a clean single-turn trace without conversation history.",
+            "The current contamination signal is possible, so a controlled replay is required before treating conversation as causal.",
+            {
+                "clean_replay_succeeds": (
+                    "Conversation contamination becomes supported for this Case."
+                ),
+                "clean_replay_still_fails": (
+                    "Conversation is not isolated as the cause; investigate the next causal boundary."
+                ),
+            },
+        )
+    elif required_source_ids and not retrieval_known:
+        remember(
+            unknown,
+            "Whether any required source appeared in retrieval candidates.",
+        )
+        probe = _structured_probe(
+            "CAPTURE_EVIDENCE",
+            "retrieval",
+            ["retrieval.candidates[].source_id and retrieval.candidates[].chunk_id"],
+            "Capture retrieval candidates for the same case, including privacy-safe source and chunk identifiers.",
+            "Retrieval evidence is the earliest missing observation needed to distinguish retrieval failure from downstream loss.",
+            {
+                "required_source_absent": "Observed evidence can support retrieval failure.",
+                "required_source_present": "Inspect ranking and context selection next.",
+            },
+        )
+    elif required_source_ids and not retrieved_required:
+        remember(
+            unknown,
+            "Whether unlabelled retrieval candidates correspond to a required source.",
+        )
+        probe = _structured_probe(
+            "CAPTURE_EVIDENCE",
+            "retrieval",
+            ["retrieval.candidates[].source_id"],
+            "Capture stable source identifiers for the observed retrieval candidates.",
+            "Source identity is required to prove absence rather than missing metadata.",
+            {
+                "required_source_absent": "Observed evidence can support retrieval failure.",
+                "required_source_present": "Continue at ranking and context selection.",
+            },
+        )
+    elif retrieved_required and not selection_known:
+        remember(
+            unknown,
+            "Whether chunks from the retrieved required source were selected for final context.",
+        )
+        probe = _structured_probe(
+            "CAPTURE_EVIDENCE",
+            "context_selection",
+            ["context_selection.selected_chunk_ids"],
+            "Capture selected chunk IDs for the same retrieval result.",
+            "The required source was retrieved, so selection is the next unresolved causal boundary.",
+            {
+                "required_chunk_excluded": "Investigate ranking or selection using ranks and drop reasons.",
+                "required_chunk_included": "Inspect final context construction next.",
+            },
+        )
+    elif context_state != "available":
+        remember(
+            unknown,
+            "Final context content is {0}, so whether required evidence reached generation is unknown.".format(
+                context_state
+            ),
+        )
+        probe = _structured_probe(
+            "CAPTURE_EVIDENCE",
+            "context",
+            [
+                "context_selection.context_text or in-memory deterministic required-fact coverage"
+            ],
+            "Capture or evaluate the final context sent to generation for the same case.",
+            "This isolates whether required evidence was lost before generation or reached the model and was not used.",
+            {
+                "required_evidence_absent": "Investigate retrieval, selection, or context construction.",
+                "required_evidence_present": "Isolate prompt and generation behavior.",
+            },
+        )
+    elif answer_failed:
+        context_failed = int(context_coverage.get("deterministic_failed", 0) or 0)
+        if required_failed and context_failed:
+            remember(
+                unknown,
+                "Whether required facts were absent from retrieved chunks or lost during context construction.",
+            )
+            probe = _structured_probe(
+                "CAPTURE_EVIDENCE",
+                "context_selection",
+                ["required-fact coverage for retrieved and selected chunks"],
+                "Capture privacy-safe required-fact coverage for retrieved and selected chunks in the same run.",
+                "Final context lacks required evidence, but its loss point is not localized.",
+                {
+                    "fact_absent_from_retrieval": "Investigate retrieval or chunking.",
+                    "fact_present_before_context": "Investigate ranking, selection, or context construction.",
+                },
+            )
+        elif raw_state != "available":
+            remember(
+                unknown,
+                "Raw generation output is {0}, so generation and postprocessing cannot be separated.".format(
+                    raw_state
+                ),
+            )
+            probe = _structured_probe(
+                "CAPTURE_EVIDENCE",
+                "generation",
+                ["generation.raw_answer or in-memory deterministic evaluation results"],
+                "Capture or evaluate the raw generation output before postprocessing.",
+                "This distinguishes a generation symptom from postprocessing damage.",
+                {
+                    "raw_answer_passes": "Investigate postprocessing and final answer assembly.",
+                    "raw_answer_fails": "Continue prompt and controlled-replay isolation.",
+                },
+            )
+        elif grounding_signal is None:
+            remember(
+                unknown,
+                "Whether the generation prompt contained an explicit grounding instruction.",
+            )
+            probe = _structured_probe(
+                "CAPTURE_EVIDENCE",
+                "prompt",
+                ["prompt.grounding_instruction_present"],
+                "Capture privacy-safe prompt grounding metadata for the same generation.",
+                "Prompt evidence is required before isolating a generation symptom.",
+                {
+                    "grounding_absent": "Investigate prompt construction before model capability.",
+                    "grounding_present": "Run the existing Gold Context Probe.",
+                },
+            )
+        else:
+            remember(
+                unknown,
+                "Whether the same model can satisfy the Case when retrieval and context construction are controlled.",
+            )
+            probe = _structured_probe(
+                "GOLD_CONTEXT",
+                "generation",
+                ["an explicit gold context and the existing Case evaluation criteria"],
+                "Run the existing `inferdoctor rag probe gold-context` controlled probe with the required evidence.",
+                "Correct observed context plus a failed answer is a generation symptom, not proof of model incapability.",
+                {
+                    "probe_passes": "Investigate production prompt or context presentation.",
+                    "probe_fails": "A controlled limitation is supported for this Case only.",
+                },
+            )
+    elif human_review_required:
+        remember(
+            unknown,
+            "Human-review criteria remain unresolved after deterministic checks.",
+        )
+        probe = _structured_probe(
+            "HUMAN_REVIEW",
+            "evaluation",
+            ["the final answer and unresolved Case human-review criteria"],
+            "Complete the smallest outstanding human review for this Case.",
+            "The remaining human criterion can still change the answer-quality conclusion.",
+            {
+                "review_passes": "No additional answer symptom is established.",
+                "review_fails": "The reviewed symptom may require causal isolation.",
+            },
+        )
+
+    if probe is None:
+        sufficiency_status = "SUFFICIENT"
+        rationale = (
+            "Available deterministic evidence is sufficient for the current "
+            "conclusion; no broken layer is established."
+        )
+    elif probe["probe_type"] in {
+        "CONTROLLED_REPLAY",
+        "GOLD_CONTEXT",
+        "HUMAN_REVIEW",
+    }:
+        sufficiency_status = "PARTIAL"
+        rationale = (
+            "Useful observations are established, but one controlled probe or "
+            "review is required for a stronger causal conclusion."
+        )
+    else:
+        sufficiency_status = "INSUFFICIENT"
+        rationale = (
+            "A required observation is unavailable or non-evaluable, so no First "
+            "Broken Layer is currently supported."
+        )
+
+    result["evidence_sufficiency"] = {
+        "status": sufficiency_status,
+        "supports_first_broken_layer": False,
+        "known": known,
+        "unknown": unknown,
+        "rationale": rationale,
+    }
+    result["minimal_next_probe"] = probe
+    return result
+
+
 def compare_rag(
     case: Dict[str, Any],
     before: Dict[str, Any],
     after: Dict[str, Any],
+    *,
+    comparison_policy: str = RAG_COMPARISON_POLICY_STRICT,
 ) -> Dict[str, Any]:
+    if comparison_policy not in {
+        RAG_COMPARISON_POLICY_STRICT,
+        RAG_COMPARISON_POLICY_QUALITY,
+    }:
+        raise RagError("unsupported RAG comparison policy")
+
     compatibility: List[str] = []
     limitations: List[str] = []
+    implementation_changes: List[str] = []
 
     if (
         before.get("case_id")
@@ -2096,9 +2607,11 @@ def compare_rag(
         before.get("pipeline")
         != after.get("pipeline")
     ):
-        compatibility.append(
-            "pipeline differs"
-        )
+        implementation_changes.append("pipeline differs")
+        if comparison_policy == RAG_COMPARISON_POLICY_STRICT:
+            compatibility.append(
+                "pipeline differs"
+            )
 
     before_model = _section_dict(
         before,
@@ -2111,8 +2624,28 @@ def compare_rag(
     ).get("model")
 
     if before_model != after_model:
-        compatibility.append(
-            "model differs"
+        implementation_changes.append("model differs")
+        if comparison_policy == RAG_COMPARISON_POLICY_STRICT:
+            compatibility.append(
+                "model differs"
+            )
+
+    before_provider = _section_dict(
+        before,
+        "generation",
+    ).get("provider")
+    after_provider = _section_dict(
+        after,
+        "generation",
+    ).get("provider")
+
+    if (
+        before_provider
+        and after_provider
+        and before_provider != after_provider
+    ):
+        implementation_changes.append(
+            "provider differs"
         )
 
     before_diag = diagnose_rag(
@@ -2317,14 +2850,20 @@ def compare_rag(
                 value == 0
                 for value in quality_changes
             )
-            and all(
-                value == 0
-                for value in performance_changes
-                if value is not None
-            )
-            and all(
-                value is not None
-                for value in performance_changes
+            and (
+                comparison_policy
+                == RAG_COMPARISON_POLICY_QUALITY
+                or (
+                    all(
+                        value == 0
+                        for value in performance_changes
+                        if value is not None
+                    )
+                    and all(
+                        value is not None
+                        for value in performance_changes
+                    )
+                )
             )
         ):
             verdict = "unchanged"
@@ -2353,12 +2892,14 @@ def compare_rag(
         "inferdoctor_version": __version__,
         "case_id": case.get("case_id"),
         "verdict": verdict,
+        "comparison_policy": comparison_policy,
         "compatibility_warnings": (
             compatibility
         ),
         "comparison_limitations": (
             list(dict.fromkeys(limitations))
         ),
+        "implementation_changes": implementation_changes,
         "changes": changes,
         "before_status": (
             before_diag["status"]
@@ -2450,7 +2991,7 @@ def _chat_payload(case: Dict[str, Any], context: str, *, retain_answer: bool) ->
     }
 
 
-def _gold_probe_evaluation(answer: str, case: Dict[str, Any]) -> Dict[str, Any]:
+def evaluate_deterministic_answer(answer: str, case: Dict[str, Any]) -> Dict[str, Any]:
     required = _required_fact_coverage(case, answer)
     forbidden = _forbidden_claims(case, answer)
     required_total = int(required.get("total") or 0)
@@ -2496,6 +3037,42 @@ def _gold_probe_evaluation(answer: str, case: Dict[str, Any]) -> Dict[str, Any]:
         "overall_status": overall_status,
         "status": overall_status.upper(),
         "diagnostic_interpretation": interpretation,
+    }
+
+
+def _gold_probe_evaluation(answer: str, case: Dict[str, Any]) -> Dict[str, Any]:
+    """Backward-compatible alias for the shared deterministic evaluator."""
+    return evaluate_deterministic_answer(answer, case)
+
+
+def unavailable_deterministic_answer(
+    case: Dict[str, Any],
+    *,
+    evidence_state: str,
+) -> Dict[str, Any]:
+    required = _unevaluable_required_fact_coverage(case, evidence_state)
+    forbidden = _unevaluable_forbidden_claims(case, evidence_state)
+    return {
+        "required_fact_checks": required,
+        "forbidden_claim_checks": forbidden,
+        "required_facts_total": int(required.get("total") or 0),
+        "required_facts_matched": 0,
+        "forbidden_claims_total": int(forbidden.get("total") or 0),
+        "forbidden_claims_matched": 0,
+        "deterministic_checks_available": bool(
+            required.get("deterministic") or forbidden.get("deterministic")
+        ),
+        "human_review_required": bool(
+            required.get("human_review_required")
+            or forbidden.get("human_review_required")
+        ),
+        "evaluation_status": "unknown",
+        "review_status": "unavailable",
+        "overall_status": "unknown",
+        "status": "UNKNOWN",
+        "diagnostic_interpretation": (
+            "No usable response evidence was available for deterministic answer verification."
+        ),
     }
 
 
@@ -2571,7 +3148,7 @@ def run_gold_context_probe(case: Dict[str, Any], *, context_text: str, endpoint:
         parsed = response.json_data
         elapsed = response.elapsed_ms
         answer = _extract_chat_answer(parsed)
-        evaluation = _gold_probe_evaluation(answer, case)
+        evaluation = evaluate_deterministic_answer(answer, case)
         result.update(evaluation)
         result.update({
             "request_sent": True,
@@ -2629,6 +3206,31 @@ def _render_console(result: Dict[str, Any]) -> str:
     for key in ("status", "overall_status", "transport_status", "evaluation_status", "review_status", "required_facts_matched", "required_facts_total", "forbidden_claims_matched", "forbidden_claims_total", "verdict", "case_count", "case_id", "trace_id"):
         if result.get(key) is not None:
             lines.append(f"{key}: {result.get(key)}")
+
+    sufficiency = result.get("evidence_sufficiency")
+    if isinstance(sufficiency, dict):
+        lines.append("")
+        lines.append(
+            "Evidence Sufficiency: {0}".format(
+                sufficiency.get("status", "UNKNOWN")
+            )
+        )
+        lines.append(str(sufficiency.get("rationale", "")))
+        known = sufficiency.get("known")
+        if isinstance(known, list) and known:
+            lines.append("Known:")
+            for message in known:
+                lines.append("- {0}".format(message))
+        unknown = sufficiency.get("unknown")
+        if isinstance(unknown, list) and unknown:
+            lines.append("Unknown:")
+            for message in unknown:
+                lines.append("- {0}".format(message))
+
+    first_layer_supported = not (
+        isinstance(sufficiency, dict)
+        and sufficiency.get("supports_first_broken_layer") is False
+    )
     attribution = result.get(
         "attribution"
     )
@@ -2646,7 +3248,7 @@ def _render_console(result: Dict[str, Any]) -> str:
 
         lines.append(
             "First broken layer: {0}".format(
-                first_layer
+                (first_layer if first_layer_supported else None)
                 or "not established"
             )
         )
@@ -2672,6 +3274,7 @@ def _render_console(result: Dict[str, Any]) -> str:
                     "  <-- FIRST BROKEN"
                     if role
                     == "FIRST_BROKEN"
+                    and first_layer_supported
                     else ""
                 )
 
@@ -2693,12 +3296,40 @@ def _render_console(result: Dict[str, Any]) -> str:
                         " (established upstream)"
                     )
 
+                elif (
+                    role
+                    == "FIRST_BROKEN"
+                    and not first_layer_supported
+                ):
+                    role_note = (
+                        " (provisional observation)"
+                    )
+
                 lines.append(
                     "- {0}: {1}{2}{3}".format(
                         item.get("layer"),
                         item.get("status"),
                         role_note,
                         marker,
+                    )
+                )
+
+    probe = result.get("minimal_next_probe")
+    if isinstance(probe, dict):
+        lines.append("")
+        lines.append("Minimal Next Probe:")
+        lines.append("Type: {0}".format(probe.get("probe_type")))
+        lines.append("Target layer: {0}".format(probe.get("target_layer")))
+        lines.append("Action: {0}".format(probe.get("action")))
+        lines.append("Why: {0}".format(probe.get("reason")))
+        outcomes = probe.get("expected_disambiguation")
+        if isinstance(outcomes, dict) and outcomes:
+            lines.append("Expected disambiguation:")
+            for outcome, interpretation in outcomes.items():
+                lines.append(
+                    "- {0}: {1}".format(
+                        outcome,
+                        interpretation,
                     )
                 )
 
@@ -2723,6 +3354,10 @@ def _render_console(result: Dict[str, Any]) -> str:
 
 def _render_markdown(result: Dict[str, Any]) -> str:
     return "# " + _render_console(result).replace("\n", "\n\n")
+
+
+def load_cases(path: str | Path) -> List[Dict[str, Any]]:
+    return _load_json_or_jsonl(path)
 
 
 def load_case(path: str | Path) -> Dict[str, Any]:

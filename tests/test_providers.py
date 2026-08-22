@@ -36,7 +36,7 @@ def test_orcarouter_preset_is_provider_metadata_only():
     assert provider.base_url == "https://api.orcarouter.ai/v1"
     assert provider.api_key_env == "ORCAROUTER_API_KEY"
     assert provider.default_model == "orcarouter/auto"
-    assert provider.partner_url is None
+    assert provider.partner_url == "https://www.orcarouter.ai/ref/ref_a81451091cc4d54480f8"
     assert [item.id for item in list_provider_presets()] == ["orcarouter"]
 
 
@@ -162,6 +162,28 @@ def test_models_route_unsupported_is_unknown_not_fail(monkeypatch):
     assert model_check["status"] == "UNKNOWN"
 
 
+def test_models_route_403_keeps_authentication_unknown(monkeypatch):
+    monkeypatch.setattr(
+        "inferdoctor.core.providers.list_models",
+        lambda *_args, **_kwargs: _response(
+            status=403,
+            data={"error": "catalog permission denied"},
+        ),
+    )
+
+    result = run_provider_check(
+        get_provider_preset("orcarouter"),
+        api_key="secret",
+        allow_public=True,
+    )
+
+    assert result["status"] == "UNKNOWN"
+    auth = [
+        item for item in result["checks"] if item["name"] == "authentication"
+    ][-1]
+    assert auth["status"] == "UNKNOWN"
+
+
 def test_invalid_models_shape_keeps_authentication_unknown(monkeypatch):
     monkeypatch.setattr(
         "inferdoctor.core.providers.list_models",
@@ -282,7 +304,7 @@ def test_provider_cli_list_show_and_check(monkeypatch, capsys):
     assert main(["provider", "show", "orcarouter"]) == 0
     show_output = capsys.readouterr().out
     assert "orcarouter/auto" in show_output
-    assert "partner_url: none" in show_output
+    assert "partner_url: https://www.orcarouter.ai/ref/ref_a81451091cc4d54480f8" in show_output
 
     monkeypatch.setenv("ORCAROUTER_API_KEY", "cli-secret")
     with patch(

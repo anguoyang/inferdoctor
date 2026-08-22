@@ -31,5 +31,5 @@ def test_pypi_readme_uses_absolute_links_only():
 def test_pypi_readme_japanese_link_points_to_github():
     text = README.read_text(encoding="utf-8")
 
-    assert "[日本語クイックスタート](https://github.com/anguoyang/inferdoctor/blob/main/README.ja.md)" in text
-    assert "[日本語クイックスタート](README.ja.md)" not in text
+    assert "[日本語](https://github.com/anguoyang/inferdoctor/blob/main/README.ja.md)" in text
+    assert "[日本語](README.ja.md)" not in text

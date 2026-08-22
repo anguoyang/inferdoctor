@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+## v0.8.0
+
+### Highlights
+
+- Added evidence sufficiency classification so missing, redacted, or insufficient evidence is not silently converted into a confident diagnosis.
+- Added structured Minimal Next Probe guidance for the smallest useful evidence-gathering or controlled experiment.
+- Added provider-neutral Provider Compare for bounded same-workload checks across OpenAI-compatible inference targets.
+- Added `inferdoctor rag gate` for CI-friendly before/after RAG regression gating with PASS / BLOCKED / INCONCLUSIVE semantics and exit codes 0 / 1 / 2.
+- Added a Quality Gate comparison policy so model, provider, and pipeline implementation changes can be evaluated without treating ordinary latency jitter as a quality regression.
+- Repositioned the GitHub and PyPI first screen around evidence-driven diagnosis, First Broken Layer, Minimal Next Probe, Fix Verification, and repeated regression gating.
+- Updated the Japanese first screen and added the lightweight animated Quality Gate demo.
+
+### Evidence and Safety Boundaries
+
+- Missing or redacted evidence remains UNKNOWN / INCONCLUSIVE.
+- First Broken Layer is established only when supported by available evidence.
+- Provider Compare produces bounded evidence, not a model benchmark or leaderboard.
+- Observed latency samples are not benchmark claims.
+- Provider and partner metadata does not influence diagnosis, comparison, ranking, or recommendation logic.
+- Live public, LAN, or private endpoint access continues to require explicit opt-in.
+- Provider Compare does not intentionally retain API keys or raw response content.
+- Quality Gate PASS is scoped to the evaluated Cases and available evidence; it is not a universal guarantee that an application has no bugs.
+
 ## v0.7.1
 
 ### Documentation and Metadata Hotfix

@@ -45,6 +45,47 @@ class ProviderPreset:
         return data
 
 
+@dataclass(frozen=True)
+class ProviderTarget:
+    id: str
+    display_name: str
+    protocol: str
+    base_url: str
+    model: str
+    api_key_env: Optional[str] = None
+    api_key_required: bool = False
+    capabilities: Tuple[str, ...] = ("models", "chat_completions")
+    source: str = "custom"
+    provider_metadata: Optional[ProviderPreset] = None
+
+    def to_public_dict(
+        self,
+        *,
+        endpoint_category: str,
+        api_key_present: bool,
+    ) -> Dict[str, Any]:
+        metadata = None
+        if self.provider_metadata is not None:
+            metadata = self.provider_metadata.to_dict()
+            metadata["base_url"] = redact_endpoint(
+                str(metadata.get("base_url") or "")
+            )
+        return {
+            "id": self.id,
+            "display_name": self.display_name,
+            "source": self.source,
+            "protocol": self.protocol,
+            "endpoint": redact_endpoint(self.base_url),
+            "endpoint_category": endpoint_category,
+            "model": self.model,
+            "api_key_env": self.api_key_env,
+            "api_key_required": self.api_key_required,
+            "api_key_present": api_key_present,
+            "capabilities": list(self.capabilities),
+            "provider_metadata": metadata,
+        }
+
+
 _PROVIDERS = {
     "orcarouter": ProviderPreset(
         id="orcarouter",
@@ -53,7 +94,7 @@ _PROVIDERS = {
         base_url="https://api.orcarouter.ai/v1",
         docs_url="https://docs.orcarouter.ai/",
         signup_url="https://www.orcarouter.ai/",
-        partner_url=None,
+        partner_url="https://www.orcarouter.ai/ref/ref_a81451091cc4d54480f8",
         api_key_env="ORCAROUTER_API_KEY",
         default_model="orcarouter/auto",
         capabilities=("models", "chat_completions"),
@@ -74,6 +115,57 @@ def get_provider_preset(provider_id: str) -> ProviderPreset:
         return _PROVIDERS[provider_id]
     except KeyError as exc:
         raise ProviderError("unknown provider preset: {0}".format(provider_id)) from exc
+
+
+def provider_target_from_preset(
+    provider: ProviderPreset,
+    *,
+    model: Optional[str] = None,
+) -> ProviderTarget:
+    selected_model = model or provider.default_model
+    if not selected_model:
+        raise ProviderError("provider target requires a model")
+    return ProviderTarget(
+        id=provider.id,
+        display_name=provider.display_name,
+        protocol=provider.protocol,
+        base_url=provider.base_url,
+        model=selected_model,
+        api_key_env=provider.api_key_env,
+        api_key_required=bool(provider.api_key_env),
+        capabilities=provider.capabilities,
+        source="preset",
+        provider_metadata=provider,
+    )
+
+
+def custom_openai_compatible_target(
+    *,
+    target_id: str,
+    display_name: str,
+    base_url: str,
+    model: str,
+    api_key_env: Optional[str] = None,
+) -> ProviderTarget:
+    if not target_id.strip():
+        raise ProviderError("custom provider target id is required")
+    if not display_name.strip():
+        raise ProviderError("custom provider target display name is required")
+    if not base_url.strip():
+        raise ProviderError("custom provider target endpoint is required")
+    if not model.strip():
+        raise ProviderError("custom provider target model is required")
+    normalized_api_key_env = api_key_env.strip() if api_key_env else None
+    return ProviderTarget(
+        id=target_id.strip(),
+        display_name=display_name.strip(),
+        protocol=OPENAI_COMPATIBLE_PROTOCOL,
+        base_url=base_url.strip(),
+        model=model.strip(),
+        api_key_env=normalized_api_key_env,
+        api_key_required=bool(normalized_api_key_env),
+        source="custom",
+    )
 
 
 def _add_check(
@@ -144,14 +236,14 @@ def _new_result(
     }
 
 
-def _endpoint_category(
-    provider: ProviderPreset,
+def validate_provider_endpoint(
+    endpoint: str,
     *,
     allow_non_local: bool,
     allow_public: bool,
 ) -> str:
-    safety = classify_endpoint(provider.base_url)
-    parts = urlsplit(provider.base_url)
+    safety = classify_endpoint(endpoint)
+    parts = urlsplit(endpoint)
     if safety.category == "invalid":
         raise ProviderError("invalid provider endpoint URL")
     if parts.username or parts.password:
@@ -163,15 +255,91 @@ def _endpoint_category(
     return safety.category
 
 
-def _model_ids(response: OpenAICompatibleResponse) -> Optional[List[str]]:
+def analyze_provider_models_response(
+    response: OpenAICompatibleResponse,
+    model: Optional[str],
+) -> Dict[str, Any]:
+    """Normalize reusable evidence from an OpenAI-compatible models response."""
+    status = response.status
+    result: Dict[str, Any] = {
+        "http_status": status,
+        "kind": "http_error",
+        "authentication_status": "UNKNOWN",
+        "catalog_status": "UNKNOWN",
+        "model_count": None,
+        "selected_model_listed": None,
+        "can_invoke": False,
+    }
+    if status == 401:
+        result["kind"] = "authentication_failure"
+        result["authentication_status"] = "FAIL"
+        return result
+    if status in UNSUPPORTED_MODELS_STATUSES:
+        result["kind"] = "unsupported"
+        result["can_invoke"] = True
+        return result
+    if not 200 <= status < 300:
+        result["can_invoke"] = status == 403
+        return result
+
     data = response.json_data
     if not isinstance(data, dict) or not isinstance(data.get("data"), list):
-        return None
-    return [
+        result["kind"] = "invalid_catalog"
+        result["can_invoke"] = True
+        return result
+    ids = [
         item["id"]
         for item in data["data"]
         if isinstance(item, dict) and isinstance(item.get("id"), str)
     ]
+    result.update(
+        {
+            "kind": "catalog",
+            "authentication_status": "PASS",
+            "catalog_status": "PASS",
+            "model_count": len(ids),
+            "selected_model_listed": model in ids if model else None,
+            "can_invoke": True,
+        }
+    )
+    return result
+
+
+def classify_provider_invocation_failure(status: int) -> Optional[Dict[str, str]]:
+    """Map invocation HTTP status to conservative provider evidence."""
+    evidence = {
+        401: {
+            "check_name": "authentication",
+            "compare_layer": "authentication",
+            "summary": "The request rejected the configured API key.",
+        },
+        403: {
+            "check_name": "model_access",
+            "compare_layer": "model_access",
+            "summary": "The endpoint denied permission to invoke the selected model.",
+        },
+        402: {
+            "check_name": "billing_or_credit",
+            "compare_layer": "billing_or_credit",
+            "summary": "The request was rejected because billing or credit is required.",
+        },
+        429: {
+            "check_name": "quota_or_rate_limit",
+            "compare_layer": "quota_or_rate_limit",
+            "summary": "The request was rejected because a quota or rate limit was reached.",
+        },
+    }
+    if status in evidence:
+        return evidence[status]
+    if 200 <= status < 300:
+        return None
+    return {
+        "check_name": "request_rejection",
+        "compare_layer": "generation",
+        "summary": "The request returned HTTP {0} before usable generation.".format(
+            status
+        ),
+    }
 
 
 def _evaluate_models(
@@ -179,6 +347,7 @@ def _evaluate_models(
     response: OpenAICompatibleResponse,
     model: Optional[str],
 ) -> Tuple[str, bool]:
+    analysis = analyze_provider_models_response(response, model)
     status = response.status
     result["request_sent"] = True
     result["models_probe"]["http_status"] = status
@@ -190,30 +359,30 @@ def _evaluate_models(
         http_status=status,
     )
 
-    if status in (401, 403):
+    if analysis["kind"] == "authentication_failure":
         _add_check(result, "authentication", "FAIL", "The provider rejected the configured API key.", http_status=status)
         _add_check(result, "model_availability", "UNKNOWN", "Authentication failed before model availability could be checked.")
         return "FAIL", False
 
-    if status in UNSUPPORTED_MODELS_STATUSES:
+    if analysis["kind"] == "unsupported":
         _add_check(result, "authentication", "UNKNOWN", "Authentication could not be inferred because /models is unsupported.", http_status=status)
         _add_check(result, "model_availability", "UNKNOWN", "Unsupported /models is not evidence that the model is unavailable.", http_status=status)
         return "UNKNOWN", True
 
-    if not 200 <= status < 300:
+    if analysis["kind"] == "http_error":
         _add_check(result, "authentication", "UNKNOWN", "Authentication could not be inferred from HTTP {0}.".format(status), http_status=status)
         _add_check(result, "model_availability", "UNKNOWN", "The models response did not establish availability.", http_status=status)
-        return ("FAIL" if status >= 500 else "UNKNOWN"), False
+        return ("FAIL" if status >= 500 else "UNKNOWN"), bool(analysis["can_invoke"])
 
-    ids = _model_ids(response)
-    if ids is None:
+    if analysis["kind"] == "invalid_catalog":
         _add_check(result, "authentication", "UNKNOWN", "HTTP success without a valid models shape does not prove authentication.", http_status=status)
         _add_check(result, "model_availability", "UNKNOWN", "The response did not contain an OpenAI-compatible data list.")
         return "UNKNOWN", True
 
-    listed = model in ids if model else None
+    listed = analysis["selected_model_listed"]
+    model_count = int(analysis["model_count"] or 0)
     result["models_probe"].update(
-        {"status": "PASS", "model_count": len(ids), "selected_model_listed": listed}
+        {"status": "PASS", "model_count": model_count, "selected_model_listed": listed}
     )
     _add_check(result, "authentication", "PASS", "The authenticated request returned an OpenAI-compatible model list.", http_status=status)
     if listed is True:
@@ -223,7 +392,7 @@ def _evaluate_models(
             "PASS",
             "The selected model was listed in the provider model catalog.",
             model=model,
-            model_count=len(ids),
+            model_count=model_count,
         )
         _add_check(
             result,
@@ -231,13 +400,13 @@ def _evaluate_models(
             "UNKNOWN",
             "Catalog listing does not prove that this API key can invoke the selected model.",
             model=model,
-            model_count=len(ids),
+            model_count=model_count,
         )
         return "UNKNOWN", True
     if model:
-        _add_check(result, "model_availability", "UNKNOWN", "The selected model was not listed; invocation was not attempted.", model=model, model_count=len(ids))
+        _add_check(result, "model_availability", "UNKNOWN", "The selected model was not listed; invocation was not attempted.", model=model, model_count=model_count)
         return "UNKNOWN", True
-    _add_check(result, "model_availability", "PASS", "The provider returned {0} model(s).".format(len(ids)), model_count=len(ids))
+    _add_check(result, "model_availability", "PASS", "The provider returned {0} model(s).".format(model_count), model_count=model_count)
     return "PASS", True
 
 
@@ -273,66 +442,26 @@ def _run_chat(
     result["request_sent"] = True
     result["chat_smoke"]["http_status"] = status
     result["metrics"]["total_latency_ms"] = response.elapsed_ms
-    if not 200 <= status < 300:
+    failure = classify_provider_invocation_failure(status)
+    if failure is not None:
         result["chat_smoke"]["status"] = "FAIL"
-
-        if status == 401:
-            _add_check(
-                result,
-                "authentication",
-                "FAIL",
-                "The optional chat request rejected the configured API key.",
-                http_status=status,
-            )
-
-        elif status == 403:
-            _add_check(
-                result,
-                "model_access",
-                "FAIL",
-                "The API key authenticated, but the provider denied permission to invoke the selected model.",
-                http_status=status,
-                model=model,
-            )
-
-        elif status == 402:
-            _add_check(
-                result,
-                "billing_or_credit",
-                "FAIL",
-                "The provider rejected the request because billing or credit is required.",
-                http_status=status,
-            )
-
-        elif status == 429:
-            _add_check(
-                result,
-                "quota_or_rate_limit",
-                "FAIL",
-                "The provider rejected the request because a quota or rate limit was reached.",
-                http_status=status,
-            )
-
-        else:
-            _add_check(
-                result,
-                "request_rejection",
-                "UNKNOWN",
-                "The provider rejected the optional chat request for an unclassified reason.",
-                http_status=status,
-            )
-
+        _add_check(
+            result,
+            failure["check_name"],
+            "FAIL" if failure["check_name"] != "request_rejection" else "UNKNOWN",
+            failure["summary"],
+            http_status=status,
+            **({"model": model} if failure["check_name"] == "model_access" else {}),
+        )
         _add_check(
             result,
             "chat_smoke",
             "FAIL",
-            "The optional chat request returned HTTP {0}.".format(
-                status
-            ),
+            "The optional chat request returned HTTP {0}.".format(status),
             http_status=status,
         )
-
         return "FAIL"
+
     if not response.json_valid or not extract_chat_text(response.json_data).strip():
         result["chat_smoke"]["status"] = "FAIL"
         _add_check(result, "chat_smoke", "FAIL", "The optional chat response contained no usable content.", http_status=status)
@@ -362,8 +491,8 @@ def run_provider_check(
     smoke: bool = False,
     model: Optional[str] = None,
 ) -> Dict[str, Any]:
-    category = _endpoint_category(
-        provider,
+    category = validate_provider_endpoint(
+        provider.base_url,
         allow_non_local=allow_non_local,
         allow_public=allow_public,
     )

@@ -12,6 +12,7 @@ from inferdoctor.core.rag import (
     compare_rag,
     diagnose_rag,
     init_case_template,
+    render_rag_result,
     run_gold_context_probe,
     validate_case_file,
     validate_trace_file,
@@ -150,9 +151,12 @@ def test_compare_improved_and_incompatible():
     before = trace(retrieved=False, answer=False)
     after = trace(retrieved=True, selected=True, answer=True)
     assert compare_rag(case(), before, after)["verdict"] == "improved"
-    changed = dict(after)
-    changed["pipeline"] = {"name": "other"}
-    assert compare_rag(case(), before, changed)["verdict"] == "incompatible"
+    changed_pipeline = dict(after)
+    changed_pipeline["pipeline"] = {"name": "other"}
+    assert compare_rag(case(), before, changed_pipeline)["verdict"] == "incompatible"
+    changed_model = trace(retrieved=True, selected=True, answer=True)
+    changed_model["generation"]["model"] = "other-fixture-model"
+    assert compare_rag(case(), before, changed_model)["verdict"] == "incompatible"
 
 
 def test_gold_context_probe_dry_run():
@@ -581,6 +585,25 @@ def test_compare_missing_latency_does_not_become_zero():
         result["verdict"]
         == "inconclusive"
     )
+
+
+def test_compare_quality_policy_keeps_latency_evidence_without_using_it():
+    before = trace()
+    after = trace()
+    after["retrieval"]["latency_ms"] = 11
+
+    strict_result = compare_rag(case(), before, after)
+    quality_result = compare_rag(
+        case(),
+        before,
+        after,
+        comparison_policy="quality",
+    )
+
+    assert strict_result["verdict"] == "inconclusive"
+    assert quality_result["verdict"] == "unchanged"
+    assert strict_result["changes"]["retrieval_latency_ms_delta"] == 1.0
+    assert quality_result["changes"]["retrieval_latency_ms_delta"] == 1.0
 
 
 def test_compare_reports_first_broken_layer_change():
@@ -1072,3 +1095,227 @@ def test_console_report_shows_layered_attribution():
         "<-- FIRST BROKEN"
         in rendered
     )
+
+
+def test_missing_final_context_selects_context_capture_probe():
+    item = trace(answer=False)
+    item["context_selection"].pop("context_text")
+
+    result = diagnose_rag(case(), item)
+
+    assert result["attribution"]["first_broken_layer"] is None
+    assert result["evidence_sufficiency"]["status"] == "INSUFFICIENT"
+    assert result["minimal_next_probe"]["probe_type"] == "CAPTURE_EVIDENCE"
+    assert result["minimal_next_probe"]["target_layer"] == "context"
+
+
+def test_missing_retrieval_selects_retrieval_capture_probe():
+    item = trace(answer=False)
+    item["retrieval"].pop("candidates")
+
+    result = diagnose_rag(case(), item)
+
+    assert result["attribution"]["first_broken_layer"] is None
+    assert result["evidence_sufficiency"]["status"] == "INSUFFICIENT"
+    assert result["minimal_next_probe"]["probe_type"] == "CAPTURE_EVIDENCE"
+    assert result["minimal_next_probe"]["target_layer"] == "retrieval"
+
+
+def test_retrieved_source_without_selection_selects_selection_probe():
+    item = trace(answer=False)
+    item["context_selection"].pop("selected_chunk_ids")
+
+    result = diagnose_rag(case(), item)
+
+    assert result["attribution"]["first_broken_layer"] is None
+    assert result["minimal_next_probe"]["target_layer"] == "context_selection"
+    assert result["minimal_next_probe"]["required_evidence"] == [
+        "context_selection.selected_chunk_ids"
+    ]
+
+
+def test_correct_context_failed_answer_reuses_gold_context_probe():
+    result = diagnose_rag(case(), trace(answer=False))
+
+    assert result["attribution"]["first_broken_layer"] is None
+    assert result["evidence_sufficiency"]["status"] == "PARTIAL"
+    assert result["minimal_next_probe"]["probe_type"] == "GOLD_CONTEXT"
+    assert result["minimal_next_probe"]["target_layer"] == "generation"
+    assert "rag probe gold-context" in result["minimal_next_probe"]["action"]
+    assert not any(
+        item["category"] == "model_reasoning_limitation"
+        for item in result["diagnoses"]
+    )
+
+
+def test_missing_evaluation_criterion_is_unknown_and_requests_definition():
+    item_case = case()
+    item_case["required_facts"] = []
+    item_case["forbidden_claims"] = []
+
+    result = diagnose_rag(item_case, trace(answer=False))
+    categories = [item["category"] for item in result["diagnoses"]]
+
+    assert result["status"] == "WARN"
+    assert "insufficient_evidence" in categories
+    assert "no_clear_failure" not in categories
+    assert result["evidence_sufficiency"]["status"] == "INSUFFICIENT"
+    assert any(
+        "not evaluable" in message
+        for message in result["evidence_sufficiency"]["unknown"]
+    )
+    assert result["minimal_next_probe"]["probe_type"] == "DEFINE_EVALUATION"
+
+
+def test_complete_success_has_no_unnecessary_probe():
+    result = diagnose_rag(case(), trace())
+
+    assert result["status"] == "PASS"
+    assert result["evidence_sufficiency"]["status"] == "SUFFICIENT"
+    assert result["evidence_sufficiency"]["supports_first_broken_layer"] is False
+    assert result["minimal_next_probe"] is None
+
+
+def test_established_first_broken_layer_is_supported_without_downstream_probe():
+    result = diagnose_rag(
+        case(),
+        trace(retrieved=False, answer=False),
+    )
+
+    assert result["attribution"]["first_broken_layer"] == "retrieval"
+    assert result["evidence_sufficiency"]["status"] == "SUFFICIENT"
+    assert result["evidence_sufficiency"]["supports_first_broken_layer"] is True
+    assert result["minimal_next_probe"] is None
+
+
+def test_redacted_context_stays_distinct_in_structured_uncertainty():
+    item = trace(answer=False)
+    context_text = item["context_selection"].pop("context_text")
+    item["context_selection"]["context_sha256"] = rag_module.sha256_text(
+        context_text
+    )
+
+    result = diagnose_rag(case(), item)
+
+    assert result["evidence_states"]["context_text"] == "redacted"
+    assert result["minimal_next_probe"]["target_layer"] == "context"
+    assert any(
+        "redacted" in message
+        for message in result["evidence_sufficiency"]["unknown"]
+    )
+
+
+def test_structured_sufficiency_and_probe_json_are_deterministic():
+    item = trace(answer=False)
+    item["context_selection"].pop("context_text")
+
+    first = diagnose_rag(case(), item)
+    second = diagnose_rag(case(), item)
+
+    assert first["evidence_sufficiency"] == second["evidence_sufficiency"]
+    assert first["minimal_next_probe"] == second["minimal_next_probe"]
+
+    first["timestamp"] = "stable"
+    second["timestamp"] = "stable"
+    assert render_rag_result(first, "json") == render_rag_result(second, "json")
+
+
+def test_console_report_shows_sufficiency_known_unknown_and_probe():
+    item = trace(answer=False)
+    item["context_selection"].pop("context_text")
+
+    rendered = render_rag_result(
+        diagnose_rag(case(), item),
+        "console",
+    )
+
+    assert "Evidence Sufficiency: INSUFFICIENT" in rendered
+    assert "First broken layer: not established" in rendered
+    assert "Known:" in rendered
+    assert "Unknown:" in rendered
+    assert "Minimal Next Probe:" in rendered
+    assert "Target layer: context" in rendered
+
+
+def test_context_truncation_unknown_is_not_supported_first_broken_layer():
+    item = trace(answer=False, truncated=True)
+    item["retrieval"]["candidates"][0].pop("text")
+    item["context_selection"]["context_text"] = "Synthetic policy heading."
+    item["context_selection"]["context_length_chars"] = 25
+
+    result = diagnose_rag(case(), item)
+    truncation = next(
+        diagnosis
+        for diagnosis in result["diagnoses"]
+        if diagnosis["category"] == "context_truncation"
+    )
+
+    assert result["attribution"]["first_broken_layer"] == "context"
+    assert truncation["evidence_strength"] == "observed"
+    assert truncation["confidence"] == "medium"
+    assert truncation["what_is_not_known"]
+    assert result["evidence_sufficiency"]["status"] == "INSUFFICIENT"
+    assert result["evidence_sufficiency"]["supports_first_broken_layer"] is False
+    assert result["minimal_next_probe"]["probe_type"] == "CAPTURE_EVIDENCE"
+    assert result["minimal_next_probe"]["target_layer"] == "context_selection"
+
+
+def test_possible_conversation_contamination_selects_controlled_replay():
+    item = trace(answer=False)
+    item["conversation"] = {
+        "history_included": True,
+        "possible_contamination_signals": ["synthetic prior-turn overlap"],
+    }
+
+    result = diagnose_rag(case(), item)
+    contamination = next(
+        diagnosis
+        for diagnosis in result["diagnoses"]
+        if diagnosis["category"] == "conversation_memory_contamination"
+    )
+
+    assert result["attribution"]["first_broken_layer"] == "conversation"
+    assert contamination["evidence_strength"] == "possible"
+    assert result["evidence_sufficiency"]["status"] == "PARTIAL"
+    assert result["evidence_sufficiency"]["supports_first_broken_layer"] is False
+    assert result["minimal_next_probe"]["probe_type"] == "CONTROLLED_REPLAY"
+    assert result["minimal_next_probe"]["target_layer"] == "conversation"
+    assert set(result["minimal_next_probe"]["expected_disambiguation"]) == {
+        "clean_replay_succeeds",
+        "clean_replay_still_fails",
+    }
+
+
+def test_renderer_does_not_establish_unsupported_provisional_layer():
+    item = trace(answer=False)
+    item["conversation"] = {
+        "history_included": True,
+        "possible_contamination_signals": ["synthetic prior-turn overlap"],
+    }
+
+    rendered = render_rag_result(diagnose_rag(case(), item), "console")
+
+    assert "First broken layer: not established" in rendered
+    assert "First broken layer: conversation" not in rendered
+    assert "<-- FIRST BROKEN" not in rendered
+    assert "provisional observation" in rendered
+
+
+def test_possible_contamination_without_evaluation_defines_evaluation_first():
+    item_case = case()
+    item_case["required_facts"] = []
+    item_case["forbidden_claims"] = []
+    item = trace(answer=False)
+    item["conversation"] = {
+        "history_included": True,
+        "possible_contamination_signals": ["synthetic prior-turn overlap"],
+    }
+
+    result = diagnose_rag(item_case, item)
+    rendered = render_rag_result(result, "console")
+
+    assert result["attribution"]["first_broken_layer"] == "conversation"
+    assert result["evidence_sufficiency"]["supports_first_broken_layer"] is False
+    assert result["minimal_next_probe"]["probe_type"] == "DEFINE_EVALUATION"
+    assert "First broken layer: not established" in rendered
+    assert "First broken layer: conversation" not in rendered
