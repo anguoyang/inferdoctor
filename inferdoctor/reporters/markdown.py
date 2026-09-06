@@ -12,12 +12,15 @@ def _translated_summary(result: CheckResult, language: str) -> str:
     """Return the localized (or English fallback) summary for a CheckResult."""
     if not result.translation_key:
         return result.summary
+    translation_key = result.translation_key
+    if not translation_key.startswith("runner."):
+        translation_key = "checker." + translation_key
     translated = t(
-        "checker." + result.translation_key,
+        translation_key,
         language,
         **(result.translation_args or {}),
     )
-    if translated == "checker." + result.translation_key:
+    if translated == translation_key:
         return result.summary
     return translated
 

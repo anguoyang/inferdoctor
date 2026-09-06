@@ -217,9 +217,12 @@ def _perf_warmup(value: str) -> int:
     return _bounded_int(value, 0, 1, "--warmup")
 
 
-def _add_language_option(parser: argparse.ArgumentParser) -> None:
+def _add_language_option(
+    parser: argparse.ArgumentParser, *, dest: str = "language"
+) -> None:
     parser.add_argument(
         "--language",
+        dest=dest,
         choices=("auto", "en", "zh", "ja"),
         default=None,
         help=(
@@ -229,7 +232,12 @@ def _add_language_option(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def _add_runtime_options(parser: argparse.ArgumentParser, *, include_language: bool = True) -> None:
+def _add_runtime_options(
+    parser: argparse.ArgumentParser,
+    *,
+    include_language: bool = True,
+    language_dest: str = "language",
+) -> None:
     parser.add_argument("--config", help="Path to a JSON or simple YAML config")
     parser.add_argument(
         "--timeout",
@@ -237,7 +245,7 @@ def _add_runtime_options(parser: argparse.ArgumentParser, *, include_language: b
         help="HTTP timeout in seconds; overrides the config value",
     )
     if include_language:
-        _add_language_option(parser)
+        _add_language_option(parser, dest=language_dest)
     parser.add_argument(
         "--verbose",
         action="store_true",
@@ -285,7 +293,7 @@ def _parser() -> argparse.ArgumentParser:
         "--endpoint",
         help="Override the selected service endpoint for this check",
     )
-    _add_runtime_options(check)
+    _add_runtime_options(check, language_dest="command_language")
 
     provider = subparsers.add_parser(
         "provider",
@@ -1514,8 +1522,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if args.command is None:
         args = parser.parse_args(["check"] + arguments)
 
-    # Extract global language setting (None → "auto")
-    language = getattr(args, "language", None) or "auto"
+    language_override = getattr(args, "command_language", None)
+    if language_override is None:
+        language_override = getattr(args, "language", None)
+    language = language_override or "auto"
 
     if args.command == "explain":
         print(render_explanation(args.topic, language=language))
@@ -1607,7 +1617,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 docker=args.docker,
                 cold_start=args.cold_start,
                 cpu_fallback_suspected=args.cpu_fallback_suspected,
-            ), language=language))
+            ), args.profile), language=language))
             return 0
         if args.optimize_command == "rag":
             print(render_optimization_report(apply_profile_to_optimization_report(advise_rag(
@@ -1626,7 +1636,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 streaming=args.streaming,
                 model_size=args.model_size,
                 vram_gib=args.vram,
-            ), language=language))
+            ), args.profile), language=language))
             return 0
         if args.optimize_command == "plan":
             if (args.baseline and not args.candidate) or (args.candidate and not args.baseline):
@@ -2480,7 +2490,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             getattr(args, "config", None),
             getattr(args, "timeout", None),
             None,
-            language,
+            language_override,
         )
         print(render_scenarios(evaluate_scenarios(results, args.target), language=language))
         return _exit_code(results)
@@ -2491,7 +2501,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             getattr(args, "config", None),
             getattr(args, "timeout", None),
             None,
-            language,
+            language_override,
         )
         rendered = (
             render_profile_json(results, config)
@@ -2520,7 +2530,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             getattr(args, "config", None),
             getattr(args, "timeout", None),
             getattr(args, "endpoint", None),
-            language,
+            language_override,
         )
         print(render_dashboard(results, config, verbose=args.verbose, language=config.language))
         return _exit_code(results)
@@ -2530,7 +2540,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         getattr(args, "config", None),
         getattr(args, "timeout", None),
         None,
-        language,
+        language_override,
     )
     rendered = (
         render_json(results)
