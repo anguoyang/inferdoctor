@@ -66,4 +66,5 @@ class SystemChecker(Checker):
                 "architecture": architecture,
                 "available_memory_bytes": memory,
             },
+            translation_key="system.ok",
         )

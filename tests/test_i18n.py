@@ -24,4 +24,4 @@ def test_auto_translation_uses_detected_environment(monkeypatch):
     monkeypatch.setenv("LANGUAGE", "ja_JP")
     monkeypatch.setenv("LANG", "C.UTF-8")
 
-    assert t("dashboard_title", "auto").startswith("InferDoctor - ローカルAI")
+    assert t("dashboard.title", "auto").startswith("InferDoctor - ローカルAI")

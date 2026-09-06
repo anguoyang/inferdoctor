@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Dict, List
 
+from inferdoctor.i18n import t
+
 
 @dataclass(frozen=True)
 class Explanation:
@@ -174,19 +176,19 @@ def explain_topics() -> List[str]:
     return sorted(EXPLANATIONS)
 
 
-def render_explanation(topic: str) -> str:
+def render_explanation(topic: str, language: str = "auto") -> str:
     explanation = EXPLANATIONS[topic]
     lines = [
-        "InferDoctor Explain: {0}".format(explanation.title),
+        t("explain.title", language, topic=explanation.title),
         "=" * 57,
         "",
-        "What it means:",
+        t("explain.what_it_means", language),
         "  {0}".format(explanation.meaning),
         "",
-        "Common causes:",
+        t("explain.common_causes", language),
     ]
     lines.extend("  - {0}".format(item) for item in explanation.common_causes)
-    lines.extend(["", "What to try next:"])
+    lines.extend(["", t("explain.what_to_try_next", language)])
     lines.extend("  - {0}".format(item) for item in explanation.next_steps)
-    lines.extend(["", "Related InferDoctor command:", "  {0}".format(explanation.related_command)])
+    lines.extend(["", t("explain.related_command", language), "  {0}".format(explanation.related_command)])
     return "\n".join(lines)

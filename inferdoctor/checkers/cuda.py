@@ -45,6 +45,7 @@ class CudaChecker(Checker):
                     "Install CUDA toolkit only if you need nvcc for compilation or a runtime that requires it.",
                 ],
                 raw_data={"nvcc_path": None, "environment": environment},
+                translation_key="cuda.not_found",
             )
 
         try:
@@ -56,6 +57,7 @@ class CudaChecker(Checker):
                 summary="nvcc timed out",
                 suggestions=["Check the CUDA toolkit installation."],
                 raw_data={"nvcc_path": executable, "environment": environment},
+                translation_key="cuda.timed_out",
             )
         except OSError as exc:
             return CheckResult(
@@ -65,6 +67,7 @@ class CudaChecker(Checker):
                 details=[str(exc)],
                 suggestions=["Repair the CUDA toolkit installation."],
                 raw_data={"nvcc_path": executable, "environment": environment},
+                translation_key="cuda.exec_error",
             )
 
         output = "\n".join(
@@ -82,6 +85,7 @@ class CudaChecker(Checker):
                     "environment": environment,
                     "returncode": completed.returncode,
                 },
+                translation_key="cuda.reported_error",
             )
 
         match = CUDA_VERSION_RE.search(output)
@@ -97,6 +101,12 @@ class CudaChecker(Checker):
             if version
             else ["Run 'nvcc --version' and verify the toolkit output."]
         )
+        if version:
+            translation_key = "cuda.version_detected"
+            translation_args = {"version": version}
+        else:
+            translation_key = "cuda.version_not_parsed"
+            translation_args = {}
         return CheckResult(
             name=self.name,
             status=status,
@@ -108,4 +118,6 @@ class CudaChecker(Checker):
                 "cuda_version": version,
                 "environment": environment,
             },
+            translation_key=translation_key,
+            translation_args=translation_args,
         )
