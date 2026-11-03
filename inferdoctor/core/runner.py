@@ -5,6 +5,7 @@ from typing import Iterable, List
 from inferdoctor.core.checker import Checker
 from inferdoctor.core.config import Config
 from inferdoctor.core.models import CheckResult, Status
+from inferdoctor.i18n import t
 
 
 def run_checks(checkers: Iterable[Checker], config: Config) -> List[CheckResult]:
@@ -23,6 +24,7 @@ def run_checks(checkers: Iterable[Checker], config: Config) -> List[CheckResult]
                         "Run with the latest InferDoctor version and report this error."
                     ],
                     raw_data={"exception_type": type(exc).__name__},
+                    translation_key="runner.checker_failed",
                 )
             )
     return results

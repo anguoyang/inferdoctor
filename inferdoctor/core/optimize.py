@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import List, Optional
 
+from inferdoctor.i18n import t
+
 
 @dataclass(frozen=True)
 class OptimizationReport:
@@ -348,19 +350,19 @@ def advise_rag(
     return OptimizationReport("RAG UX Optimization Advice", situation, bottlenecks, quick_wins, next_commands, caveats)
 
 
-def render_optimization_report(report: OptimizationReport) -> str:
-    lines = [report.title, "=" * 57, "Current situation:"]
+def render_optimization_report(report: OptimizationReport, language: str = "auto") -> str:
+    lines = [report.title, "=" * 57, t("optimize.current_situation", language)]
     lines.extend("- {0}".format(item) for item in report.situation)
-    lines.extend(["", "Likely bottlenecks:"])
+    lines.extend(["", t("optimize.possible_bottlenecks", language)])
     lines.extend("- {0}".format(item) for item in report.bottlenecks)
-    lines.extend(["", "Recommended quick wins:"])
+    lines.extend(["", t("optimize.quick_wins", language)])
     for index, item in enumerate(report.quick_wins, start=1):
         parts = item.splitlines()
         if not parts:
             continue
         lines.append("{0}. {1}".format(index, parts[0]))
         lines.extend("   {0}".format(part) for part in parts[1:])
-    lines.extend(["", "Safe next commands:"])
+    lines.extend(["", t("optimize.safe_next_command", language)])
     lines.extend("- {0}".format(item) for item in report.next_commands)
     lines.extend(["", "What InferDoctor cannot know yet:"])
     lines.extend("- {0}".format(item) for item in report.caveats)

@@ -401,7 +401,7 @@ def test_perf_markdown_report_is_issue_friendly(monkeypatch):
     result = run_endpoint_smoke("http://127.0.0.1:8000/v1", "local-model", timeout=3)
     rendered = render_perf_markdown(result)
 
-    assert "# InferDoctor Performance Smoke Test" in rendered
+    assert "# InferDoctor Performance UX Smoke Test" in rendered
     assert "not a benchmark" in rendered
     assert "## Suggestions" in rendered
 

@@ -26,6 +26,7 @@ class DockerChecker(Checker):
                     "Install Docker only if your local stack depends on containers.",
                 ],
                 raw_data={"docker_path": None, "daemon_reachable": False},
+                translation_key="docker.not_found",
             )
 
         try:
@@ -37,6 +38,7 @@ class DockerChecker(Checker):
                 summary="Docker daemon check timed out",
                 suggestions=["Run docker info directly and check whether the daemon is responsive."],
                 raw_data={"docker_path": executable, "daemon_reachable": False},
+                translation_key="docker.timed_out",
             )
         except OSError as exc:
             return CheckResult(
@@ -46,6 +48,7 @@ class DockerChecker(Checker):
                 details=[str(exc)],
                 suggestions=["Check the Docker CLI installation."],
                 raw_data={"docker_path": executable, "daemon_reachable": False},
+                translation_key="docker.exec_error",
             )
 
         version = completed.stdout.strip()
@@ -65,6 +68,7 @@ class DockerChecker(Checker):
                     "daemon_reachable": False,
                     "returncode": completed.returncode,
                 },
+                translation_key="docker.daemon_not_reachable",
             )
 
         return CheckResult(
@@ -77,4 +81,5 @@ class DockerChecker(Checker):
                 "daemon_reachable": True,
                 "server_version": version or None,
             },
+            translation_key="docker.reachable",
         )

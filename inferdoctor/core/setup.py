@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
 
+from inferdoctor.i18n import t
+
 
 GOALS = [
     "chatbot",
@@ -128,20 +130,20 @@ def _display_runtime(value: str) -> str:
     return value if " " in value else value.title()
 
 
-def render_setup_plan(plan: SetupPlan) -> str:
+def render_setup_plan(plan: SetupPlan, language: str = "auto") -> str:
     lines = [
-        "InferDoctor Guided Setup",
+        t("setup.title", language),
         "=" * 57,
         "Goal: {0}".format(plan.goal),
         "Preference: {0}".format(plan.preference),
         "Existing runtime: {0}".format(plan.runtime),
         "",
-        "Plain-English recommendation:",
+        t("setup.plain_english", language),
         "  Start with {0}.".format(_display_runtime(plan.recommended_runtime)),
         "  Use the {0} template.".format(plan.template),
         "  {0}".format(plan.reason),
         "",
-        "Step-by-step next actions:",
+        t("setup.step_by_step", language),
         "  1. Check this machine: {0}".format(plan.diagnosis_command),
         "  2. Inspect the template: inferdoctor template show {0}".format(plan.template),
         "  3. Create the starter: {0}".format(plan.template_command),

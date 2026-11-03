@@ -5,6 +5,7 @@ from inferdoctor.core.config import Config
 from inferdoctor.core.models import CheckResult, Status
 from inferdoctor.core.runner import run_checks
 from inferdoctor.reporters import render_console, render_json, render_markdown
+from inferdoctor.core.recommendations import recommend_stack, render_recommendation
 
 
 class BrokenChecker(Checker):
@@ -80,3 +81,27 @@ def test_console_translations_ja():
     console = render_console([result], language="ja")
 
     assert "提案：提案" in console
+
+
+def test_runner_failure_summary_is_translated():
+    result = CheckResult(
+        name="broken",
+        status=Status.FAIL,
+        summary="Checker failed unexpectedly",
+        translation_key="runner.checker_failed",
+    )
+
+    assert "检查器意外失败" in render_console([result], language="zh")
+
+
+def test_japanese_recommendation_translation_receives_placeholders():
+    recommendation = recommend_stack(
+        goal="customer-service",
+        preference="easiest",
+        vram_gib=24,
+    )
+
+    rendered = render_recommendation(recommendation, language="ja")
+
+    assert "推奨：" in rendered
+    assert "ランタイムパス：" in rendered

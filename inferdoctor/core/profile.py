@@ -9,6 +9,7 @@ from inferdoctor import __version__
 from inferdoctor.core.config import Config
 from inferdoctor.core.health import recommend_fixes
 from inferdoctor.core.models import CheckResult
+from inferdoctor.i18n import t
 
 SENSITIVE_KEY_PARTS = (
     "token",
@@ -196,16 +197,16 @@ def _format_value(value: Any) -> str:
     return str(value)
 
 
-def render_profile_markdown(results: Iterable[CheckResult], config: Config) -> str:
+def render_profile_markdown(results: Iterable[CheckResult], config: Config, language: str = "auto") -> str:
     profile = build_profile(results, config)
     lines = [
-        "# InferDoctor Safe Diagnostic Profile",
+        t("profile.title", language),
         "",
         "Generated: `{0}`".format(profile["generated_at"]),
         "",
         "> Safe to share by default: secrets, endpoint credentials, query strings, and home paths are redacted.",
         "",
-        "## System",
+        t("profile.section_system", language),
         "",
         "| Field | Value |",
         "| --- | --- |",
@@ -214,7 +215,7 @@ def render_profile_markdown(results: Iterable[CheckResult], config: Config) -> s
     for key in ("os", "python_version", "architecture", "available_memory_gib"):
         lines.append("| {0} | {1} |".format(key, _format_value(system.get(key))))
 
-    lines.extend(["", "## GPUs", ""])
+    lines.extend(["", t("profile.section_gpu", language), ""])
     if profile["gpus"]:
         lines.extend(["| GPU | VRAM | Driver |", "| --- | --- | --- |"])
         for gpu in profile["gpus"]:
@@ -228,7 +229,7 @@ def render_profile_markdown(results: Iterable[CheckResult], config: Config) -> s
     else:
         lines.append("No NVIDIA GPU data was detected.")
 
-    lines.extend(["", "## Commands", "", "| Command | Available | Path |", "| --- | --- | --- |"])
+    lines.extend(["", t("profile.section_commands", language), "", "| Command | Available | Path |", "| --- | --- | --- |"])
     for command, data in sorted(profile["commands"].items()):
         lines.append(
             "| {0} | {1} | {2} |".format(
@@ -238,7 +239,7 @@ def render_profile_markdown(results: Iterable[CheckResult], config: Config) -> s
             )
         )
 
-    lines.extend(["", "## Configured Endpoints", "", "| Name | URL |", "| --- | --- |"])
+    lines.extend(["", t("profile.section_endpoints", language), "", "| Name | URL |", "| --- | --- |"])
     for name, url in profile["configured_endpoints"].items():
         lines.append("| {0} | `{1}` |".format(name, url))
 

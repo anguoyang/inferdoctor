@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Iterable, List
 
+from inferdoctor.i18n import t
+
 
 @dataclass(frozen=True)
 class TemplateInfo:
@@ -175,9 +177,9 @@ def _join(values: Iterable[str]) -> str:
     return ", ".join(values) if values else "none"
 
 
-def render_template_list() -> str:
+def render_template_list(language: str = "auto") -> str:
     lines = [
-        "InferDoctor Local AI App Templates",
+        t("templates.title", language),
         "=" * 57,
         "Pick a small starter app after your machine and endpoint look healthy.",
         "This command only shows options. It does not create files.",
@@ -186,9 +188,9 @@ def render_template_list() -> str:
     for template in list_templates():
         lines.extend([
             "{0}  ({1})".format(template.name, template.estimated_difficulty),
-            "  Builds: {0}".format(template.title),
+            t("templates.what_it_builds", language) + " {0}".format(template.title),
             "  Needs: {0}".format(_join(template.required_stack)),
-            "  Good for: {0}".format(template.target_user),
+            t("templates.who_its_for", language) + " {0}".format(template.target_user),
             "",
         ])
     lines.extend([
@@ -200,20 +202,20 @@ def render_template_list() -> str:
     return "\n".join(lines)
 
 
-def render_template_detail(name: str) -> str:
+def render_template_detail(name: str, language: str = "auto") -> str:
     template = get_template(name)
     lines = [
         "InferDoctor Template: {0}".format(template.name),
         "=" * 57,
         template.title,
         "",
-        "What it builds:",
+        t("templates.what_it_builds", language),
         "  {0}".format(template.description),
         "",
-        "Who it is for:",
+        t("templates.who_its_for", language),
         "  {0}".format(template.target_user),
         "",
-        "Stack fit:",
+        t("templates.suitable_stack", language),
         "  Required: {0}".format(_join(template.required_stack)),
         "  Optional: {0}".format(_join(template.optional_stack)),
         "  Hardware: {0}".format(template.hardware_recommendation),
@@ -1236,7 +1238,7 @@ def create_template_project(name: str, output_dir: str) -> list[str]:
     return written
 
 
-def render_template_create_summary(name: str, output_dir: str, written: list[str]) -> str:
+def render_template_create_summary(name: str, output_dir: str, written: list[str], language: str = "auto") -> str:
     run_command = "python app.py" if name in {"customer-service", "restaurant-ordering"} else "python ingest.py && python query.py \"What is an OpenAI-compatible endpoint?\""
     dry_run_command = "python app.py --dry-run" if name in {"customer-service", "restaurant-ordering"} else "python query.py --dry-run"
     check_config_command = "python app.py --check-config" if name in {"customer-service", "restaurant-ordering"} else "python query.py --check-config"
@@ -1426,7 +1428,7 @@ def create_compose_project(name: str, output_dir: str) -> list[str]:
     return written
 
 
-def render_compose_create_summary(name: str, output_dir: str, written: list[str]) -> str:
+def render_compose_create_summary(name: str, output_dir: str, written: list[str], language: str = "auto") -> str:
     lines = [
         "InferDoctor Docker Compose Files Created",
         "=" * 57,
@@ -1454,7 +1456,7 @@ def render_compose_create_summary(name: str, output_dir: str, written: list[str]
 
 
 
-def render_template_registry() -> str:
+def render_template_registry(language: str = "auto") -> str:
     lines = [
         "InferDoctor Template Registry",
         "=" * 57,

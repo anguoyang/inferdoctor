@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import List, Optional
 
 from inferdoctor.core.capacity import detect_hardware, estimate_model_memory_gib, parse_model_size_b
+from inferdoctor.i18n import t
 
 
 @dataclass(frozen=True)
@@ -98,26 +99,26 @@ def estimate_model_fit(
     )
 
 
-def render_model_fit(result: ModelFitResult) -> str:
+def render_model_fit(result: ModelFitResult, language: str = "auto") -> str:
     vram = "unknown" if result.vram_gib is None else "{0:g} GiB".format(result.vram_gib)
     runtime = result.runtime or "generic"
     lines = [
-        "InferDoctor Model Fit Advisor",
+        t("model_fit.title", language),
         "=" * 57,
         "Heuristic estimate only. This is not a benchmark.",
         "",
-        "Request:",
+        t("model_fit.request", language, description=""),
         "  Model size: {0:g}B".format(result.size_b),
         "  Quantization: {0}".format(result.quant.upper()),
         "  Runtime: {0}".format(runtime),
         "  VRAM: {0}".format(vram),
         "",
-        "Estimate:",
+        t("model_fit.estimate", language, description=""),
         "  Estimated memory: {0:.1f} GiB".format(result.estimated_memory_gib),
         "  Fit: {0}".format(result.fit),
         "  Why: {0}".format(result.reason),
         "",
-        "Runtime guidance:",
+        t("model_fit.runtime_guidance", language),
         "  Easiest path: {0}".format(result.easiest_path),
         "  Performance path: {0}".format(result.performance_path),
         "",

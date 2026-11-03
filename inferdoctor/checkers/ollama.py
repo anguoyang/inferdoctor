@@ -30,6 +30,11 @@ class OllamaChecker(Checker):
                 if executable
                 else "Ollama was not found and its API is not reachable"
             )
+            translation_key = (
+                "ollama.installed_not_reachable"
+                if executable
+                else "ollama.not_found_not_reachable"
+            )
             suggestions = [
                 "Start Ollama or update endpoints.ollama.",
                 "No action is needed if Ollama is not used on this machine.",
@@ -45,6 +50,7 @@ class OllamaChecker(Checker):
                     "url": url,
                     "reachable": False,
                 },
+                translation_key=translation_key,
             )
 
         raw_data = response_raw_data(response)
@@ -64,6 +70,8 @@ class OllamaChecker(Checker):
                     "Verify the Ollama endpoint and inspect the Ollama service logs."
                 ],
                 raw_data=raw_data,
+                translation_key="ollama.http_error",
+                translation_args={"status": response.status},
             )
 
         models = None
@@ -86,6 +94,7 @@ class OllamaChecker(Checker):
                     "Add the Ollama CLI to PATH if local command access is expected."
                 ],
                 raw_data=raw_data,
+                translation_key="ollama.api_reachable_cli_missing",
             )
 
         return CheckResult(
@@ -94,4 +103,5 @@ class OllamaChecker(Checker):
             summary="Ollama CLI and API are available",
             details=details,
             raw_data=raw_data,
+            translation_key="ollama.ready",
         )
