@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## v0.8.1
+
+- Extended console i18n with English, Japanese, and Chinese status and system labels for the default/check dashboard and verbose result summaries, preserving English output. Shared diagnostic text and file reports remain unchanged.
+- Added Doctor family links to sibling Rockchip board diagnostic tool RK Edge Doctor in the English and Japanese READMEs.
+- Updated package and CLI version metadata to 0.8.1.
+
 ## v0.8.0
 
 ### Highlights

@@ -601,6 +601,13 @@ The generated files live under `examples/` and use fixed sample values instead
 of probing the current machine.
 
 
+## The Doctor family
+
+InferDoctor diagnoses the AI application layer.
+Its sibling RK Edge Doctor diagnoses Rockchip edge boards at the hardware/board layer.
+
+[RK Edge Doctor](https://github.com/anguoyang/rk-edge-doctor)
+
 ## More Guides
 
 - [Getting started](https://github.com/anguoyang/inferdoctor/blob/main/docs/getting_started.md)
