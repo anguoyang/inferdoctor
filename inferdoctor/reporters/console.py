@@ -11,7 +11,6 @@ from inferdoctor.i18n import t
 
 
 DISPLAY_NAMES = {
-    "system": "System",
     "nvidia": "NVIDIA",
     "cuda": "CUDA",
     "ollama": "Ollama",
@@ -56,7 +55,7 @@ def render_console(
             t(
                 "console_status",
                 language,
-                status=result.status.value.upper(),
+                status=t("console_status_" + result.status.value, language),
                 name=result.name,
                 summary=result.summary,
             )
@@ -92,10 +91,16 @@ def render_dashboard(
     ]
     for result in result_list:
         lines.append(
-            "{0:<11} {1:<8} {2}".format(
-                DISPLAY_NAMES.get(result.name, result.name.title()),
-                result.status.value.upper(),
-                shorten(result.summary, width=50, placeholder="..."),
+            t(
+                "dashboard_row",
+                language,
+                name=(
+                    t("console_component_system", language)
+                    if result.name == "system"
+                    else DISPLAY_NAMES.get(result.name, result.name.title())
+                ),
+                status=t("console_status_" + result.status.value, language),
+                summary=shorten(result.summary, width=50, placeholder="..."),
             )
         )
 

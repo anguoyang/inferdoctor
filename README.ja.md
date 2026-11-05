@@ -156,6 +156,13 @@ InferDoctor は軽量で、デフォルトでは読み取り専用です。
 - GPU がない CPU-only マシンでも動作します。
 - live endpoint smoke test は短く、timeout-bounded です。
 
+## Doctor ファミリー
+
+InferDoctor は AI アプリケーション層の診断を担当します。
+兄弟ツールの RK Edge Doctor は、Rockchip エッジボードのハードウェア・ボード層を診断します。
+
+[RK Edge Doctor](https://github.com/anguoyang/rk-edge-doctor)
+
 ## 次に読むもの
 
 - [English README](https://github.com/anguoyang/inferdoctor/blob/main/README.md)
