@@ -37,6 +37,12 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "console_status_skip": "SKIP",
         "console_component_system": "System",
         "dashboard_row": "{name:<11} {status:<8} {summary}",
+        "markdown_title": "# InferDoctor Report",
+        "markdown_generated": "Generated: `{generated_at}`",
+        "markdown_header": "| Check | Status | Summary |",
+        "markdown_details": "**Details**",
+        "markdown_suggestions": "**Suggestions**",
+        "markdown_raw_data": "**Raw data**",
     },
     "zh": {
         "dashboard_title": "InferDoctor - 本地 AI 堆栈健康检查",
@@ -69,6 +75,12 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "console_status_skip": "跳过",
         "console_component_system": "系统",
         "dashboard_row": "{name:<11} {status:<8} {summary}",
+        "markdown_title": "# InferDoctor 报告",
+        "markdown_generated": "生成时间：`{generated_at}`",
+        "markdown_header": "| 检查项 | 状态 | 摘要 |",
+        "markdown_details": "**详情**",
+        "markdown_suggestions": "**建议**",
+        "markdown_raw_data": "**原始数据**",
     },
     "ja": {
         "dashboard_title": "InferDoctor - ローカルAIスタックヘルスチェック",
@@ -101,6 +113,12 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "console_status_skip": "スキップ",
         "console_component_system": "システム",
         "dashboard_row": "{name:<11} {status:<8} {summary}",
+        "markdown_title": "# InferDoctor レポート",
+        "markdown_generated": "生成日時：`{generated_at}`",
+        "markdown_header": "| チェック | ステータス | 概要 |",
+        "markdown_details": "**詳細**",
+        "markdown_suggestions": "**提案**",
+        "markdown_raw_data": "**生データ**",
     },
 }
 

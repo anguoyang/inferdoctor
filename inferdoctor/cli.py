@@ -2538,7 +2538,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     rendered = (
         render_json(results)
         if args.format == "json"
-        else render_markdown(results, verbose=args.verbose)
+        else render_markdown(results, verbose=args.verbose, language=config.language)
     )
     if args.output:
         try:
