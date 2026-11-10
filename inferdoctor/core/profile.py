@@ -9,6 +9,7 @@ from inferdoctor import __version__
 from inferdoctor.core.config import Config
 from inferdoctor.core.health import recommend_fixes
 from inferdoctor.core.models import CheckResult
+from inferdoctor.i18n import t
 
 SENSITIVE_KEY_PARTS = (
     "token",
@@ -197,26 +198,27 @@ def _format_value(value: Any) -> str:
 
 
 def render_profile_markdown(results: Iterable[CheckResult], config: Config) -> str:
+    language = config.language
     profile = build_profile(results, config)
     lines = [
-        "# InferDoctor Safe Diagnostic Profile",
+        t("profile_title", language),
         "",
-        "Generated: `{0}`".format(profile["generated_at"]),
+        t("profile_generated", language, generated_at=profile["generated_at"]),
         "",
-        "> Safe to share by default: secrets, endpoint credentials, query strings, and home paths are redacted.",
+        t("profile_note", language),
         "",
-        "## System",
+        t("profile_section_system", language),
         "",
-        "| Field | Value |",
+        t("profile_system_header", language),
         "| --- | --- |",
     ]
     system = profile["system"]
     for key in ("os", "python_version", "architecture", "available_memory_gib"):
         lines.append("| {0} | {1} |".format(key, _format_value(system.get(key))))
 
-    lines.extend(["", "## GPUs", ""])
+    lines.extend(["", t("profile_section_gpus", language), ""])
     if profile["gpus"]:
-        lines.extend(["| GPU | VRAM | Driver |", "| --- | --- | --- |"])
+        lines.extend([t("profile_gpus_header", language), "| --- | --- | --- |"])
         for gpu in profile["gpus"]:
             lines.append(
                 "| {0} | {1} GiB | {2} |".format(
@@ -226,43 +228,76 @@ def render_profile_markdown(results: Iterable[CheckResult], config: Config) -> s
                 )
             )
     else:
-        lines.append("No NVIDIA GPU data was detected.")
+        lines.append(t("profile_no_gpus", language))
 
-    lines.extend(["", "## Commands", "", "| Command | Available | Path |", "| --- | --- | --- |"])
+    lines.extend(
+        [
+            "",
+            t("profile_section_commands", language),
+            "",
+            t("profile_commands_header", language),
+            "| --- | --- | --- |",
+        ]
+    )
     for command, data in sorted(profile["commands"].items()):
         lines.append(
             "| {0} | {1} | {2} |".format(
                 command,
-                "yes" if data.get("available") else "no",
+                t(
+                    "profile_available_yes"
+                    if data.get("available")
+                    else "profile_available_no",
+                    language,
+                ),
                 _format_value(data.get("path")),
             )
         )
 
-    lines.extend(["", "## Configured Endpoints", "", "| Name | URL |", "| --- | --- |"])
+    lines.extend(
+        [
+            "",
+            t("profile_section_endpoints", language),
+            "",
+            t("profile_endpoints_header", language),
+            "| --- | --- |",
+        ]
+    )
     for name, url in profile["configured_endpoints"].items():
         lines.append("| {0} | `{1}` |".format(name, url))
 
-    lines.extend(["", "## Checker Summary", "", "| Check | Status | Summary |", "| --- | --- | --- |"])
+    lines.extend(
+        [
+            "",
+            t("profile_section_checker_summary", language),
+            "",
+            t("markdown_header", language),
+            "| --- | --- | --- |",
+        ]
+    )
     for item in profile["checker_summary"]:
         lines.append(
             "| {0} | **{1}** | {2} |".format(
-                item["name"], item["status"].upper(), item["summary"]
+                item["name"],
+                t("console_status_" + item["status"], language),
+                item["summary"],
             )
         )
 
-    lines.extend(["", "## Top Fixes", ""])
+    lines.extend(["", t("profile_section_top_fixes", language), ""])
     if profile["top_fixes"]:
         for index, fix in enumerate(profile["top_fixes"], start=1):
             lines.extend(
                 [
                     "{0}. **{1}**: {2}".format(index, fix["component"], fix["issue"]),
-                    "   - Likely cause: {0}".format(fix["likely_cause"]),
-                    "   - Try: `{0}`".format(fix["next_command"]),
+                    t("profile_likely_cause", language, cause=fix["likely_cause"]),
+                    t("profile_try", language, command=fix["next_command"]),
                 ]
             )
             if fix.get("config_hint"):
-                lines.append("   - Config hint: `{0}`".format(fix["config_hint"]))
+                lines.append(
+                    t("profile_config_hint", language, config_hint=fix["config_hint"])
+                )
     else:
-        lines.append("No immediate fixes recommended.")
+        lines.append(t("profile_no_fixes", language))
     lines.append("")
     return "\n".join(lines)
