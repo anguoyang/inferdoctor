@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from inferdoctor.core.perf import REPORT_SCHEMA_VERSION, sanitize_endpoint
+from inferdoctor.i18n import t
 
 BASELINE_SCHEMA_VERSION = "inferdoctor.perf.baseline.v1"
 
@@ -185,62 +186,113 @@ def delete_baseline(identifier: str | Path, directory: Optional[str | Path] = No
     return path
 
 
-def render_baseline_summary(baseline: Dict[str, Any], path: Optional[str | Path] = None) -> str:
+def render_baseline_summary(
+    baseline: Dict[str, Any], path: Optional[str | Path] = None, language: str = "auto"
+) -> str:
     metrics = baseline.get("metrics") if isinstance(baseline.get("metrics"), dict) else {}
     lines = [
-        "InferDoctor Performance Baseline",
+        t("perf_baseline_title", language),
         "=" * 57,
-        "Name: {0}".format(baseline.get("name") or "unnamed"),
-        "Path: {0}".format(path) if path else "Path: not saved",
-        "Endpoint: {0}".format(baseline.get("endpoint") or "not provided"),
-        "Model: {0}".format(baseline.get("model") or "not provided"),
-        "Runtime: {0}".format(baseline.get("runtime") or "not provided"),
-        "Test type: {0}".format(baseline.get("test_type") or "unknown"),
-        "Streaming: {0}".format(baseline.get("streaming_state") or "unknown"),
-        "TTFT: {0}".format(metrics.get("ttft_seconds")),
-        "Total latency: {0}".format(metrics.get("total_latency_seconds")),
-        "Generation duration: {0}".format(metrics.get("generation_duration_seconds")),
-        "Generation TPS: {0}".format(metrics.get("generation_tokens_per_second")),
-        "Successful runs: {0}".format(baseline.get("successful_runs", 0)),
-        "Failed runs: {0}".format(baseline.get("failed_runs", 0)),
-        "Readiness: {0}".format(baseline.get("readiness_category") or "unknown"),
+        t("perf_baseline_name", language, name=baseline.get("name") or "unnamed"),
+        t("perf_baseline_path", language, path=path if path else "not saved"),
+        t("perf_baseline_endpoint", language, endpoint=baseline.get("endpoint") or "not provided"),
+        t("perf_baseline_model", language, model=baseline.get("model") or "not provided"),
+        t("perf_baseline_runtime", language, runtime=baseline.get("runtime") or "not provided"),
+        t("perf_baseline_test_type", language, test_type=baseline.get("test_type") or "unknown"),
+        t("perf_baseline_streaming", language, streaming=baseline.get("streaming_state") or "unknown"),
+        t("perf_baseline_ttft", language, value=metrics.get("ttft_seconds")),
+        t("perf_baseline_total_latency", language, value=metrics.get("total_latency_seconds")),
+        t(
+            "perf_baseline_generation_duration",
+            language,
+            value=metrics.get("generation_duration_seconds"),
+        ),
+        t(
+            "perf_baseline_generation_tps",
+            language,
+            value=metrics.get("generation_tokens_per_second"),
+        ),
+        t("perf_baseline_successful_runs", language, count=baseline.get("successful_runs", 0)),
+        t("perf_baseline_failed_runs", language, count=baseline.get("failed_runs", 0)),
+        t(
+            "perf_baseline_readiness",
+            language,
+            readiness=baseline.get("readiness_category") or "unknown",
+        ),
     ]
     warnings = baseline.get("warnings") or []
     if warnings:
-        lines.extend(["", "Warnings:"])
+        lines.extend(["", t("perf_baseline_warnings", language)])
         lines.extend("- {0}".format(item) for item in warnings)
     return "\n".join(lines)
 
 
-def render_baseline_list(paths: List[Path]) -> str:
-    lines = ["InferDoctor Performance Baselines", "=" * 57]
+def render_baseline_list(paths: List[Path], language: str = "auto") -> str:
+    lines = [t("perf_baseline_list_title", language), "=" * 57]
     if not paths:
-        lines.append("No baselines found.")
-        lines.append("Create one with: inferdoctor perf baseline create --report perf.json --name before")
+        lines.append(t("perf_baseline_none", language))
+        lines.append(t("perf_baseline_create_hint", language))
         return "\n".join(lines)
     for path in paths:
         try:
             data = _read_json(path)
-            lines.append("- {0}: {1} | {2} | {3}".format(data.get("name") or path.stem, data.get("model") or "model unknown", data.get("test_type") or "test unknown", path))
+            lines.append(
+                "- {0}: {1} | {2} | {3}".format(
+                    data.get("name") or path.stem,
+                    data.get("model") or "model unknown",
+                    data.get("test_type") or "test unknown",
+                    path,
+                )
+            )
         except ValueError:
-            lines.append("- {0}: unreadable baseline".format(path))
+            lines.append(t("perf_baseline_unreadable", language, path=path))
     return "\n".join(lines)
 
 
-def render_baseline_markdown(baseline: Dict[str, Any], path: Optional[str | Path] = None) -> str:
+def render_baseline_markdown(
+    baseline: Dict[str, Any], path: Optional[str | Path] = None, language: str = "auto"
+) -> str:
     metrics = baseline.get("metrics") if isinstance(baseline.get("metrics"), dict) else {}
     lines = [
-        "# InferDoctor Performance Baseline",
+        t("perf_baseline_markdown_title", language),
         "",
-        "- Name: `{0}`".format(baseline.get("name") or "unnamed"),
-        "- Path: `{0}`".format(path or "not saved"),
-        "- Endpoint: `{0}`".format(baseline.get("endpoint") or "not provided"),
-        "- Model: `{0}`".format(baseline.get("model") or "not provided"),
-        "- Test type: `{0}`".format(baseline.get("test_type") or "unknown"),
-        "- Streaming: `{0}`".format(baseline.get("streaming_state") or "unknown"),
-        "- TTFT: `{0}`".format(metrics.get("ttft_seconds")),
-        "- Total latency: `{0}`".format(metrics.get("total_latency_seconds")),
-        "- Generation TPS: `{0}`".format(metrics.get("generation_tokens_per_second")),
-        "- Readiness: **{0}**".format(baseline.get("readiness_category") or "unknown"),
+        t("perf_baseline_markdown_name", language, name=baseline.get("name") or "unnamed"),
+        t("perf_baseline_markdown_path", language, path=path or "not saved"),
+        t(
+            "perf_baseline_markdown_endpoint",
+            language,
+            endpoint=baseline.get("endpoint") or "not provided",
+        ),
+        t(
+            "perf_baseline_markdown_model",
+            language,
+            model=baseline.get("model") or "not provided",
+        ),
+        t(
+            "perf_baseline_markdown_test_type",
+            language,
+            test_type=baseline.get("test_type") or "unknown",
+        ),
+        t(
+            "perf_baseline_markdown_streaming",
+            language,
+            streaming=baseline.get("streaming_state") or "unknown",
+        ),
+        t("perf_baseline_markdown_ttft", language, value=metrics.get("ttft_seconds")),
+        t(
+            "perf_baseline_markdown_total_latency",
+            language,
+            value=metrics.get("total_latency_seconds"),
+        ),
+        t(
+            "perf_baseline_markdown_generation_tps",
+            language,
+            value=metrics.get("generation_tokens_per_second"),
+        ),
+        t(
+            "perf_baseline_markdown_readiness",
+            language,
+            readiness=baseline.get("readiness_category") or "unknown",
+        ),
     ]
     return "\n".join(lines)
