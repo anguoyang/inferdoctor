@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Dict, Iterable, List, Optional
 
 from inferdoctor.core.models import CheckResult, Status
+from inferdoctor.i18n import t
 
 
 @dataclass(frozen=True)
@@ -210,20 +211,23 @@ def _cpu_only_fallback(results: Dict[str, CheckResult]) -> ScenarioResult:
     )
 
 
-def render_scenarios(scenarios: Iterable[ScenarioResult]) -> str:
+def render_scenarios(
+    scenarios: Iterable[ScenarioResult], language: str = "auto"
+) -> str:
     lines = [
-        "InferDoctor Scenario Readiness",
+        t("scenario_title", language),
         "=" * 57,
-        "Goal-oriented diagnosis for common local AI setups.",
+        t("scenario_subtitle", language),
         "",
     ]
     for scenario in scenarios:
+        status = t("console_status_" + scenario.status.value, language)
         lines.extend(
             [
                 "{0}:".format(scenario.title),
-                "  Status: {0}".format(scenario.status.value.upper()),
-                "  Reason: {0}".format(scenario.reason),
-                "  Next step: {0}".format(scenario.next_step),
+                t("scenario_status", language, status=status),
+                t("scenario_reason", language, reason=scenario.reason),
+                t("scenario_next_step", language, next_step=scenario.next_step),
                 "",
             ]
         )

@@ -63,6 +63,11 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "profile_try": "   - Try: `{command}`",
         "profile_config_hint": "   - Config hint: `{config_hint}`",
         "profile_no_fixes": "No immediate fixes recommended.",
+        "scenario_title": "InferDoctor Scenario Readiness",
+        "scenario_subtitle": "Goal-oriented diagnosis for common local AI setups.",
+        "scenario_status": "  Status: {status}",
+        "scenario_reason": "  Reason: {reason}",
+        "scenario_next_step": "  Next step: {next_step}",
     },
     "zh": {
         "dashboard_title": "InferDoctor - 本地 AI 堆栈健康检查",
@@ -121,6 +126,11 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "profile_try": "   - 尝试：`{command}`",
         "profile_config_hint": "   - 配置提示：`{config_hint}`",
         "profile_no_fixes": "没有发现紧急修复建议。",
+        "scenario_title": "InferDoctor 场景就绪度",
+        "scenario_subtitle": "针对常见本地 AI 设置的目标导向诊断。",
+        "scenario_status": "  状态：{status}",
+        "scenario_reason": "  原因：{reason}",
+        "scenario_next_step": "  下一步：{next_step}",
     },
     "ja": {
         "dashboard_title": "InferDoctor - ローカルAIスタックヘルスチェック",
@@ -179,6 +189,11 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "profile_try": "   - 試す: `{command}`",
         "profile_config_hint": "   - 設定のヒント: `{config_hint}`",
         "profile_no_fixes": "すぐに必要な修正はありません。",
+        "scenario_title": "InferDoctor シナリオ準備状況",
+        "scenario_subtitle": "一般的なローカルAI構成向けの目的別診断。",
+        "scenario_status": "  ステータス: {status}",
+        "scenario_reason": "  理由: {reason}",
+        "scenario_next_step": "  次のステップ: {next_step}",
     },
 }
 
