@@ -2471,13 +2471,18 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return 0
 
     if args.command in ("scenario", "scenarios"):
-        results, _ = _results_for_target(
+        results, config = _results_for_target(
             None,
             getattr(args, "config", None),
             getattr(args, "timeout", None),
             None,
         )
-        print(render_scenarios(evaluate_scenarios(results, args.target)))
+        print(
+            render_scenarios(
+                evaluate_scenarios(results, args.target),
+                language=config.language,
+            )
+        )
         return _exit_code(results)
 
     if args.command == "profile":
