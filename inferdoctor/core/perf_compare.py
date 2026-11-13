@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from inferdoctor.core.perf import sanitize_endpoint
 from inferdoctor.core.perf_baseline import load_report_or_baseline
+from inferdoctor.i18n import t
 
 COMPARE_SCHEMA_VERSION = "inferdoctor.perf.compare.v1"
 
@@ -222,14 +223,18 @@ def _fmt(value: Any, suffix: str = "") -> str:
     return "{0}{1}".format(value, suffix)
 
 
-def render_comparison_console(comparison: Dict[str, Any]) -> str:
+def render_comparison_console(comparison: Dict[str, Any], language: str = "auto") -> str:
     lines = [
-        "InferDoctor Performance Comparison",
+        t("perf_compare_title", language),
         "=" * 57,
-        "Verdict: {0}".format(comparison.get("verdict", "inconclusive")),
-        "Comparable: {0}".format("yes" if comparison.get("compatible") else "no"),
+        t("perf_compare_verdict", language, verdict=comparison.get("verdict", "inconclusive")),
+        t(
+            "perf_compare_comparable",
+            language,
+            comparable="yes" if comparison.get("compatible") else "no",
+        ),
         "",
-        "Metric                         Baseline        Candidate       Change          Result",
+        t("perf_compare_header", language),
         "-" * 86,
     ]
     labels = {**LOWER_IS_BETTER, **HIGHER_IS_BETTER}
@@ -247,24 +252,32 @@ def render_comparison_console(comparison: Dict[str, Any]) -> str:
             )
         )
     if comparison.get("warnings"):
-        lines.extend(["", "Compatibility warnings:"])
+        lines.extend(["", t("perf_compare_warnings", language)])
         lines.extend("- {0}".format(item) for item in comparison["warnings"])
-    lines.extend(["", "Top observations:"])
+    lines.extend(["", t("perf_compare_observations", language)])
     lines.extend("- {0}".format(item) for item in comparison.get("observations", []))
-    lines.extend(["", "Suggested next action:"])
+    lines.extend(["", t("perf_compare_suggestions", language)])
     lines.extend("- {0}".format(item) for item in comparison.get("suggestions", []))
-    lines.extend(["", "Note: This compares bounded smoke-test outputs, not benchmark results."])
+    lines.extend(["", t("perf_compare_note", language)])
     return "\n".join(lines)
 
 
-def render_comparison_markdown(comparison: Dict[str, Any]) -> str:
+def render_comparison_markdown(comparison: Dict[str, Any], language: str = "auto") -> str:
     lines = [
-        "# InferDoctor Performance Comparison",
+        t("perf_compare_markdown_title", language),
         "",
-        "- Verdict: **{0}**".format(comparison.get("verdict", "inconclusive")),
-        "- Comparable: `{0}`".format("yes" if comparison.get("compatible") else "no"),
+        t(
+            "perf_compare_markdown_verdict",
+            language,
+            verdict=comparison.get("verdict", "inconclusive"),
+        ),
+        t(
+            "perf_compare_markdown_comparable",
+            language,
+            comparable="yes" if comparison.get("compatible") else "no",
+        ),
         "",
-        "| Metric | Baseline | Candidate | Change | Result |",
+        t("perf_compare_markdown_header", language),
         "| --- | ---: | ---: | ---: | --- |",
     ]
     labels = {**LOWER_IS_BETTER, **HIGHER_IS_BETTER}
@@ -282,19 +295,21 @@ def render_comparison_markdown(comparison: Dict[str, Any]) -> str:
             )
         )
     if comparison.get("warnings"):
-        lines.extend(["", "## Compatibility warnings", ""])
+        lines.extend(["", t("perf_compare_markdown_section_warnings", language), ""])
         lines.extend("- {0}".format(item) for item in comparison["warnings"])
-    lines.extend(["", "## Observations", ""])
+    lines.extend(["", t("perf_compare_markdown_section_observations", language), ""])
     lines.extend("- {0}".format(item) for item in comparison.get("observations", []))
-    lines.extend(["", "## Suggested next action", ""])
+    lines.extend(["", t("perf_compare_markdown_section_suggestions", language), ""])
     lines.extend("- {0}".format(item) for item in comparison.get("suggestions", []))
-    lines.extend(["", "This compares bounded smoke-test outputs, not benchmark results."])
+    lines.extend(["", t("perf_compare_markdown_note", language)])
     return "\n".join(lines)
 
 
-def render_comparison(comparison: Dict[str, Any], output_format: str = "console") -> str:
+def render_comparison(
+    comparison: Dict[str, Any], output_format: str = "console", language: str = "auto"
+) -> str:
     if output_format == "json":
         return render_comparison_json(comparison)
     if output_format == "markdown":
-        return render_comparison_markdown(comparison)
-    return render_comparison_console(comparison)
+        return render_comparison_markdown(comparison, language=language)
+    return render_comparison_console(comparison, language=language)

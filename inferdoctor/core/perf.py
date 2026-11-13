@@ -16,6 +16,7 @@ from inferdoctor.core.openai_compatible import (
     chat_completions_url as _chat_url,
     models_url as _models_url,
 )
+from inferdoctor.i18n import t
 
 SMOKE_PROMPT = "Reply with one short sentence: local AI endpoint smoke test."
 MAX_BODY_BYTES = 1024 * 1024
@@ -728,70 +729,92 @@ def _fmt_optional(value: Optional[float]) -> str:
     return "unknown" if value is None else "{0:.2f}".format(value)
 
 
-def render_perf_result(result: PerfResult) -> str:
+def render_perf_result(result: PerfResult, language: str = "auto") -> str:
     lines = [
-        "InferDoctor Performance UX Smoke Test",
+        t("perf_title", language),
         "=" * 57,
-        "Mode: {0}".format(result.mode),
-        "Endpoint: {0}".format(sanitize_endpoint(result.endpoint)),
-        "Model: {0}".format(result.model or "not provided"),
-        "Reachable: {0}".format("yes" if result.reachable else "no"),
-        "OpenAI-compatible check: {0}".format(result.openai_compatible),
-        "Streaming observed: {0}".format(result.streaming_supported),
-        "Successful measured runs: {0}".format(result.successful_runs),
-        "Failed measured runs: {0}".format(result.failed_runs),
-        "TTFT median: {0}".format(_fmt_seconds(result.ttft_seconds)),
-        "Total latency median: {0}".format(_fmt_seconds(result.total_latency_seconds)),
-        "Generation duration median: {0}".format(_fmt_seconds(result.generation_duration_seconds)),
-        "Generation speed: {0}".format(_fmt_rate(result.rough_tokens_per_second, result.tps_quality)),
-        "Token metric quality: {0}".format(result.metric_quality.get("tokens", result.output_token_source)),
-        "User experience read: {0}".format(result.user_experience),
-        "Confidence: {0}".format(result.confidence),
+        t("perf_mode", language, mode=result.mode),
+        t("perf_endpoint", language, endpoint=sanitize_endpoint(result.endpoint)),
+        t("perf_model", language, model=result.model or "not provided"),
+        t("perf_reachable", language, reachable="yes" if result.reachable else "no"),
+        t("perf_openai_compatible", language, openai_compatible=result.openai_compatible),
+        t("perf_streaming_observed", language, streaming=result.streaming_supported),
+        t("perf_successful_runs", language, count=result.successful_runs),
+        t("perf_failed_runs", language, count=result.failed_runs),
+        t("perf_ttft_median", language, value=_fmt_seconds(result.ttft_seconds)),
+        t("perf_total_latency_median", language, value=_fmt_seconds(result.total_latency_seconds)),
+        t("perf_generation_duration_median", language, value=_fmt_seconds(result.generation_duration_seconds)),
+        t("perf_generation_speed", language, value=_fmt_rate(result.rough_tokens_per_second, result.tps_quality)),
+        t(
+            "perf_token_metric_quality",
+            language,
+            quality=result.metric_quality.get("tokens", result.output_token_source),
+        ),
+        t("perf_user_experience", language, experience=result.user_experience),
+        t("perf_confidence", language, confidence=result.confidence),
     ]
     if result.experience_explanation:
-        lines.append("Why: {0}".format(result.experience_explanation))
+        lines.append(t("perf_why", language, explanation=result.experience_explanation))
     if result.aggregate_metrics:
         lines.extend(
             [
                 "",
-                "Aggregate metrics:",
-                "- TTFT min/median/max: {0}s / {1}s / {2}s".format(
-                    _fmt_optional(result.aggregate_metrics.get("ttft_min")),
-                    _fmt_optional(result.aggregate_metrics.get("ttft_median")),
-                    _fmt_optional(result.aggregate_metrics.get("ttft_max")),
+                t("perf_aggregate_metrics", language),
+                t(
+                    "perf_aggregate_ttft",
+                    language,
+                    min=_fmt_optional(result.aggregate_metrics.get("ttft_min")),
+                    median=_fmt_optional(result.aggregate_metrics.get("ttft_median")),
+                    max=_fmt_optional(result.aggregate_metrics.get("ttft_max")),
                 ),
-                "- Total latency median: {0}s".format(_fmt_optional(result.aggregate_metrics.get("total_latency_median"))),
-                "- Generation TPS median: {0}".format(_fmt_rate(result.aggregate_metrics.get("generation_tps_median"), result.tps_quality)),
+                t(
+                    "perf_aggregate_total_latency",
+                    language,
+                    median=_fmt_optional(result.aggregate_metrics.get("total_latency_median")),
+                ),
+                t(
+                    "perf_aggregate_generation_tps",
+                    language,
+                    value=_fmt_rate(
+                        result.aggregate_metrics.get("generation_tps_median"),
+                        result.tps_quality,
+                    ),
+                ),
             ]
         )
     if result.warnings:
-        lines.extend(["", "Warnings:"])
+        lines.extend(["", t("perf_warnings", language)])
         lines.extend("- {0}".format(item) for item in result.warnings)
     if result.errors:
-        lines.extend(["", "Errors:"])
+        lines.extend(["", t("perf_errors", language)])
         lines.extend("- {0}".format(item) for item in result.errors[:3])
-    lines.extend(["", "Checks:"])
+    lines.extend(["", t("perf_checks", language)])
     for check in result.checks:
         lines.append("- [{0}] {1}: {2}".format(check.status, check.name, check.summary))
         for detail in check.details:
             lines.append("  - {0}".format(detail))
     if result.runs:
-        lines.extend(["", "Measured runs:"])
+        lines.extend(["", t("perf_measured_runs", language)])
         for run in [run for run in result.runs if not run.warmup]:
             lines.append(
-                "- Run {0}: {1}, streaming={2}, TTFT={3}, total={4}, TPS={5}".format(
-                    run.index,
-                    "PASS" if run.success else "FAIL",
-                    run.streaming_observed,
-                    _fmt_seconds(run.ttft_seconds),
-                    _fmt_seconds(run.total_latency_seconds),
-                    _fmt_rate(run.tokens_per_second, run.tps_quality),
+                t(
+                    "perf_measured_run_line",
+                    language,
+                    index=run.index,
+                    status=t(
+                        "console_status_pass" if run.success else "console_status_fail",
+                        language,
+                    ),
+                    streaming=run.streaming_observed,
+                    ttft=_fmt_seconds(run.ttft_seconds),
+                    total=_fmt_seconds(run.total_latency_seconds),
+                    tps=_fmt_rate(run.tokens_per_second, run.tps_quality),
                 )
             )
-    lines.extend(["", "Top optimization suggestions:"])
+    lines.extend(["", t("perf_top_suggestions", language)])
     for index, suggestion in enumerate(result.suggestions[:5], start=1):
         lines.append("{0}. {1}".format(index, suggestion))
-    lines.extend(["", "Note: This is a timeout-bounded smoke test, not a benchmark. Results vary by prompt, model, runtime, cache state, and hardware."])
+    lines.extend(["", t("perf_note", language)])
     return "\n".join(lines)
 
 
@@ -854,33 +877,44 @@ def render_perf_json(result: PerfResult) -> str:
     return json.dumps(perf_result_to_dict(result), indent=2, sort_keys=True)
 
 
-def render_perf_markdown(result: PerfResult) -> str:
+def render_perf_markdown(result: PerfResult, language: str = "auto") -> str:
     lines = [
-        "# InferDoctor Performance Smoke Test",
+        t("perf_markdown_title", language),
         "",
-        "- Endpoint: `{0}`".format(sanitize_endpoint(result.endpoint)),
-        "- Model: `{0}`".format(result.model or "not provided"),
-        "- Test type: `{0}`".format(result.mode),
-        "- Streaming observed: `{0}`".format(result.streaming_supported),
-        "- Successful runs: `{0}`".format(result.successful_runs),
-        "- Failed runs: `{0}`".format(result.failed_runs),
-        "- TTFT median: `{0}`".format(_fmt_seconds(result.ttft_seconds)),
-        "- Total latency median: `{0}`".format(_fmt_seconds(result.total_latency_seconds)),
-        "- Generation speed: `{0}`".format(_fmt_rate(result.rough_tokens_per_second, result.tps_quality)),
-        "- Experience: **{0}**".format(result.user_experience),
+        t("perf_markdown_endpoint", language, endpoint=sanitize_endpoint(result.endpoint)),
+        t("perf_markdown_model", language, model=result.model or "not provided"),
+        t("perf_markdown_test_type", language, mode=result.mode),
+        t("perf_markdown_streaming_observed", language, streaming=result.streaming_supported),
+        t("perf_markdown_successful_runs", language, count=result.successful_runs),
+        t("perf_markdown_failed_runs", language, count=result.failed_runs),
+        t("perf_markdown_ttft_median", language, value=_fmt_seconds(result.ttft_seconds)),
+        t(
+            "perf_markdown_total_latency_median",
+            language,
+            value=_fmt_seconds(result.total_latency_seconds),
+        ),
+        t(
+            "perf_markdown_generation_speed",
+            language,
+            value=_fmt_rate(result.rough_tokens_per_second, result.tps_quality),
+        ),
+        t("perf_markdown_experience", language, experience=result.user_experience),
         "",
-        "## Notes",
+        t("perf_markdown_section_notes", language),
         "",
-        "This is a timeout-bounded smoke test, not a benchmark. Do not use it as a throughput claim.",
+        t("perf_markdown_note", language),
         "",
-        "## Suggestions",
+        t("perf_markdown_section_suggestions", language),
         "",
     ]
-    lines.extend("{0}. {1}".format(index, item) for index, item in enumerate(result.suggestions[:5], start=1))
+    lines.extend(
+        "{0}. {1}".format(index, item)
+        for index, item in enumerate(result.suggestions[:5], start=1)
+    )
     if result.warnings:
-        lines.extend(["", "## Warnings", ""])
+        lines.extend(["", t("perf_markdown_section_warnings", language), ""])
         lines.extend("- {0}".format(item) for item in result.warnings)
     if result.errors:
-        lines.extend(["", "## Errors", ""])
+        lines.extend(["", t("perf_markdown_section_errors", language), ""])
         lines.extend("- {0}".format(item) for item in result.errors[:5])
     return "\n".join(lines)
